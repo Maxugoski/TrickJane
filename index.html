@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trick Jane</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-container">
+    <!-- Dilemma Title -->
+    <h1 class="dilemma-title" id="dilemma-title">
+      Should you push the stranger to save five people?
+    </h1>
+
+    <!-- Verdict Subtitle -->
+    <p class="verdict-line">
+      Jane says <span class="verdict-no">No</span>. Flip it to <span class="verdict-yes">Yes</span>.
+    </p>
+
+    <!-- Score & Track Box -->
+    <section class="score-card" aria-label="Jane's probability score">
+      <div class="score-top-row">
+        <div class="score-value-block">
+          <span class="score-percentage" id="score-percentage">24%</span>
+          <span class="score-delta" id="score-delta"></span>
+        </div>
+        <div class="score-meta-block">
+          <div class="score-label">Jane's chance of saying Yes</div>
+          <div class="score-sub" id="score-sub">Started at 24%</div>
+        </div>
+      </div>
+
+      <!-- Slider Track -->
+      <div class="slider-wrapper">
+        <span class="track-label track-no">No</span>
+        <div class="track-bar" id="track-bar">
+          <div class="track-fill" id="track-fill" style="width: 24%;"></div>
+          <div class="track-knob" id="track-knob" style="left: 24%;">
+            <!-- Animated Knob SVG Icon -->
+            <svg class="knob-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle>
+              <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" stroke-width="2"></line>
+              <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"></line>
+            </svg>
+          </div>
+        </div>
+        <span class="track-label track-yes">Yes</span>
+      </div>
+    </section>
+
+    <!-- Word / Sentence Form -->
+    <form class="input-form" id="input-form">
+      <div class="input-row">
+        <input 
+          type="text" 
+          id="word-input" 
+          class="text-input" 
+          placeholder="write a word or sentence to persuade Jane" 
+          autocomplete="off" 
+          spellcheck="true" 
+          autofocus 
+          required
+        />
+        <button type="submit" id="submit-btn" class="ask-btn">
+          <span class="btn-text">Ask Jane</span>
+          <svg class="loading-spinner hidden" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="#ffffff" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>
+          </svg>
+        </button>
+      </div>
+    </form>
+
+    <!-- Word Chips Chain -->
+    <div class="chips-container" id="chips-container">
+      <div class="chips-list" id="chips-list">
+        <!-- Rendered dynamically -->
+      </div>
+      <div class="chain-actions hidden" id="chain-actions">
+        <button type="button" class="action-btn" id="undo-btn">Undo</button>
+        <button type="button" class="action-btn" id="clear-btn">Clear</button>
+      </div>
+    </div>
+
+    <!-- Negative Words List -->
+    <div class="negative-row hidden" id="negative-row">
+      <span class="negative-label">Negative</span>
+      <div class="negative-list" id="negative-list">
+        <!-- Negative chips rendered here -->
+      </div>
+    </div>
+
+    <!-- Feedback Status Line -->
+    <p class="status-summary hidden" id="status-summary"></p>
+
+    <!-- Target Progress & Milestone -->
+    <div class="target-row">
+      <div class="target-word-badge" id="target-word-badge">yes</div>
+      <div class="target-dots" id="target-dots">
+        <span class="target-slot"></span>
+        <span class="target-slot"></span>
+      </div>
+      <span class="target-text" id="target-text">Win by flipping past 50%.</span>
+    </div>
+
+    <!-- Jane's Dialectic Thought Box (Subtle, sleek, non-intrusive) -->
+    <div class="thought-container" id="thought-container">
+      <div class="thought-badge">Jane's Critique</div>
+      <div class="thought-text" id="thought-text">
+        "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
