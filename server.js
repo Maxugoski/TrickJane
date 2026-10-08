@@ -205,7 +205,7 @@ const server = http.createServer(async (req, res) => {
 
     return sendJson(res, 200, {
       success: true,
-      leaderboard: sorted.slice(0, 25)
+      leaderboard: sorted.slice(0, 10)
     });
   }
 
@@ -265,7 +265,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 201, {
         success: true,
         entry,
-        leaderboard: sorted.slice(0, 25)
+        leaderboard: sorted.slice(0, 10)
       });
     } catch (err) {
       return sendJson(res, 400, { error: err.message || 'Failed to submit score' });

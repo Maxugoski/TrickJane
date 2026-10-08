@@ -9,20 +9,50 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    (function() {
+      const saved = localStorage.getItem('trickjane:theme');
+      if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
 </head>
 <body>
-  <!-- Top Navigation Bar for Auth -->
+  <!-- Top Navigation Bar for Auth & Theme Toggle -->
   <header class="top-header">
     <div class="header-inner">
       <span class="header-mark">Trick Jane</span>
-      <div class="auth-status-area">
-        <div class="auth-buttons-group" id="auth-buttons-group">
-          <button type="button" class="auth-btn auth-btn-secondary" id="open-signin-btn">Sign In</button>
-          <button type="button" class="auth-btn auth-btn-primary" id="open-signup-btn">Sign Up</button>
-        </div>
-        <div class="user-badge hidden" id="user-badge">
-          <span class="user-name-text">@<span id="logged-username"></span></span>
-          <button type="button" class="logout-btn" id="logout-btn">Log out</button>
+      <div class="header-actions">
+        <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle dark mode" aria-label="Toggle dark mode">
+          <svg class="theme-icon theme-icon-sun hidden" id="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="theme-icon theme-icon-moon" id="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+          <span class="theme-label" id="theme-label">Dark</span>
+        </button>
+
+        <div class="auth-status-area">
+          <div class="auth-buttons-group" id="auth-buttons-group">
+            <button type="button" class="auth-btn auth-btn-secondary" id="open-signin-btn">Sign In</button>
+            <button type="button" class="auth-btn auth-btn-primary" id="open-signup-btn">Sign Up</button>
+          </div>
+          <div class="user-badge hidden" id="user-badge">
+            <span class="user-name-text">@<span id="logged-username"></span></span>
+            <button type="button" class="logout-btn" id="logout-btn">Log out</button>
+          </div>
         </div>
       </div>
     </div>
@@ -32,145 +62,175 @@
     <!-- Account / System Notification Toast -->
     <div id="toast-banner" class="toast-banner hidden" role="status"></div>
 
-    <!-- Dilemma Title -->
-    <h1 class="dilemma-title" id="dilemma-title">
-      Should you push the stranger to save five people?
-    </h1>
-
-    <!-- Verdict Subtitle -->
-    <p class="verdict-line">
-      Jane says <span class="verdict-no">No</span>. Flip it to <span class="verdict-yes">Yes</span>.
-    </p>
-
-    <!-- Score & Track Box -->
-    <section class="score-card" aria-label="Jane's probability score">
-      <div class="score-top-row">
-        <div class="score-value-block">
-          <span class="score-percentage" id="score-percentage">24%</span>
-          <span class="score-delta" id="score-delta"></span>
+    <!-- Warm-up Milestone Bar (Exact match to Trick Jev) -->
+    <div class="warmup-bar" id="warmup-bar">
+      <div class="warmup-text-group">
+        <span class="warmup-highlight" id="warmup-highlight">Warm-up 1 of 2</span>
+        <span class="warmup-desc" id="warmup-desc">Win it to unlock the next question.</span>
+      </div>
+      <div class="warmup-stepper" aria-label="Question progress">
+        <div class="step-node step-active" id="step-node-1" title="Question 1 (In Progress)">
+          <span class="step-num">1</span>
         </div>
-        <div class="score-meta-block">
-          <div class="score-label">Jane's chance of saying Yes</div>
-          <div class="score-sub" id="score-sub">Started at 24%</div>
+        <div class="step-line" id="step-line-1"></div>
+        <div class="step-node step-locked" id="step-node-2" title="Question 2 (Locked)">
+          <span class="step-num">2</span>
+        </div>
+        <div class="step-line" id="step-line-2"></div>
+        <div class="step-pill step-locked" id="step-pill-race" title="Race Mode (Locked)">
+          Race
         </div>
       </div>
+    </div>
 
-      <!-- Slider Track -->
-      <div class="slider-wrapper">
-        <span class="track-label track-no">No</span>
-        <div class="track-bar" id="track-bar">
-          <div class="track-fill" id="track-fill" style="width: 24%;"></div>
-          <div class="track-knob" id="track-knob" style="left: 24%;">
-            <!-- Animated Knob SVG Icon -->
-            <svg class="knob-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle>
-              <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" stroke-width="2"></line>
-              <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"></line>
-            </svg>
+    <!-- Dilemma Title & Verdict Hero Header -->
+    <header class="dilemma-hero-header">
+      <h1 class="dilemma-title" id="dilemma-title">
+        Should you push the stranger to save five people?
+      </h1>
+      <p class="verdict-line">
+        Jane says <span class="verdict-no">No</span>. Flip it to <span class="verdict-yes">Yes</span>.
+      </p>
+    </header>
+
+    <!-- Desktop Responsive Layout Grid -->
+    <div class="desktop-content-grid">
+      <!-- Main Game Column -->
+      <div class="game-main-column">
+        <!-- Score & Track Box -->
+        <section class="score-card" aria-label="Jane's probability score">
+          <div class="score-top-row">
+            <div class="score-value-block">
+              <span class="score-percentage" id="score-percentage">24%</span>
+              <span class="score-delta" id="score-delta"></span>
+            </div>
+            <div class="score-meta-block">
+              <div class="score-label">Jane's chance of saying Yes</div>
+              <div class="score-sub" id="score-sub">Started at 24%</div>
+            </div>
+          </div>
+
+          <!-- Slider Track -->
+          <div class="slider-wrapper">
+            <span class="track-label track-no">No</span>
+            <div class="track-bar" id="track-bar">
+              <div class="track-fill" id="track-fill" style="width: 24%;"></div>
+              <div class="track-knob" id="track-knob" style="left: 24%;">
+                <!-- Animated Knob SVG Icon -->
+                <svg class="knob-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"></circle>
+                  <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" stroke-width="2"></line>
+                  <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"></line>
+                </svg>
+              </div>
+            </div>
+            <span class="track-label track-yes">Yes</span>
+          </div>
+        </section>
+
+        <!-- Word / Sentence Form -->
+        <form class="input-form" id="input-form">
+          <div class="input-row">
+            <input 
+              type="text" 
+              id="word-input" 
+              class="text-input" 
+              placeholder="write a word or sentence to trick Jane" 
+              autocomplete="off" 
+              spellcheck="true" 
+              autofocus 
+              required
+            />
+            <button type="submit" id="submit-btn" class="ask-btn">
+              <span class="btn-text">Ask Jane</span>
+              <svg class="loading-spinner hidden" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="#ffffff" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>
+              </svg>
+            </button>
+          </div>
+        </form>
+
+        <!-- Word Chips Chain -->
+        <div class="chips-container" id="chips-container">
+          <div class="chips-list" id="chips-list">
+            <!-- Rendered dynamically -->
+          </div>
+          <div class="chain-actions hidden" id="chain-actions">
+            <button type="button" class="action-btn" id="undo-btn">Undo</button>
+            <button type="button" class="action-btn" id="clear-btn">Clear</button>
           </div>
         </div>
-        <span class="track-label track-yes">Yes</span>
-      </div>
-    </section>
 
-    <!-- Word / Sentence Form -->
-    <form class="input-form" id="input-form">
-      <div class="input-row">
-        <input 
-          type="text" 
-          id="word-input" 
-          class="text-input" 
-          placeholder="write a word or sentence to persuade Jane" 
-          autocomplete="off" 
-          spellcheck="true" 
-          autofocus 
-          required
-        />
-        <button type="submit" id="submit-btn" class="ask-btn">
-          <span class="btn-text">Ask Jane</span>
-          <svg class="loading-spinner hidden" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="#ffffff" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>
-          </svg>
-        </button>
-      </div>
-    </form>
+        <!-- Negative Words List -->
+        <div class="negative-row hidden" id="negative-row">
+          <span class="negative-label">Negative</span>
+          <div class="negative-list" id="negative-list">
+            <!-- Negative chips rendered here -->
+          </div>
+        </div>
 
-    <!-- Word Chips Chain -->
-    <div class="chips-container" id="chips-container">
-      <div class="chips-list" id="chips-list">
-        <!-- Rendered dynamically -->
-      </div>
-      <div class="chain-actions hidden" id="chain-actions">
-        <button type="button" class="action-btn" id="undo-btn">Undo</button>
-        <button type="button" class="action-btn" id="clear-btn">Clear</button>
-      </div>
-    </div>
+        <!-- Feedback Status Line -->
+        <p class="status-summary hidden" id="status-summary"></p>
 
-    <!-- Negative Words List -->
-    <div class="negative-row hidden" id="negative-row">
-      <span class="negative-label">Negative</span>
-      <div class="negative-list" id="negative-list">
-        <!-- Negative chips rendered here -->
-      </div>
-    </div>
+        <!-- Target Progress & Milestone -->
+        <div class="target-row">
+          <div class="target-word-badge" id="target-word-badge">yes</div>
+          <div class="target-dots" id="target-dots">
+            <span class="target-slot"></span>
+            <span class="target-slot"></span>
+          </div>
+          <span class="target-text" id="target-text">Win by flipping past 50%.</span>
+        </div>
 
-    <!-- Feedback Status Line -->
-    <p class="status-summary hidden" id="status-summary"></p>
-
-    <!-- Target Progress & Milestone -->
-    <div class="target-row">
-      <div class="target-word-badge" id="target-word-badge">yes</div>
-      <div class="target-dots" id="target-dots">
-        <span class="target-slot"></span>
-        <span class="target-slot"></span>
-      </div>
-      <span class="target-text" id="target-text">Win by flipping past 50%.</span>
-    </div>
-
-    <!-- Jane's Dialectic Thought Box -->
-    <div class="thought-container" id="thought-container">
-      <div class="thought-badge">Jane's Critique</div>
-      <div class="thought-text" id="thought-text">
-        "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
-      </div>
-    </div>
-
-    <!-- Leaderboard Section (Visible only when logged in) -->
-    <section class="leaderboard-card hidden" id="leaderboard-card">
-      <div class="leaderboard-header">
-        <h2 class="leaderboard-title">Leaderboard</h2>
-        <span class="leaderboard-sub">Top Persuaders</span>
-      </div>
-      <div class="leaderboard-table-wrapper">
-        <table class="leaderboard-table" id="leaderboard-table">
-          <thead>
-            <tr>
-              <th class="th-rank">Rank</th>
-              <th class="th-user">Persuader</th>
-              <th class="th-score">Points</th>
-            </tr>
-          </thead>
-          <tbody id="leaderboard-body">
-            <!-- Dynamically populated from JSON Database -->
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Locked Leaderboard State (Visible when logged out) -->
-    <section class="leaderboard-locked-card" id="leaderboard-locked-card">
-      <div class="locked-header">
-        <h2 class="leaderboard-title">Leaderboard</h2>
-        <span class="leaderboard-sub">Restricted to Dialectic Members</span>
-      </div>
-      <div class="locked-content">
-        <p class="locked-desc">Sign in or create an account to view the live leaderboard and record your points.</p>
-        <div class="locked-actions">
-          <button type="button" class="auth-btn auth-btn-secondary" id="locked-signin-btn">Sign In</button>
-          <button type="button" class="auth-btn auth-btn-primary" id="locked-signup-btn">Sign Up</button>
+        <!-- Jane's Dialectic Thought Box -->
+        <div class="thought-container" id="thought-container">
+          <div class="thought-badge">Jane's Critique</div>
+          <div class="thought-text" id="thought-text">
+            "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
+          </div>
         </div>
       </div>
-    </section>
+
+      <!-- Leaderboard Sidebar Column -->
+      <aside class="leaderboard-sidebar-column">
+        <!-- Leaderboard Section (Visible only when logged in) -->
+        <section class="leaderboard-card hidden" id="leaderboard-card">
+          <div class="leaderboard-header">
+            <h2 class="leaderboard-title">Leaderboard</h2>
+            <span class="leaderboard-sub">Top 10 Tricksters</span>
+          </div>
+          <div class="leaderboard-table-wrapper">
+            <table class="leaderboard-table" id="leaderboard-table">
+              <thead>
+                <tr>
+                  <th class="th-rank">Rank</th>
+                  <th class="th-user">Trickster</th>
+                  <th class="th-score">Points</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body">
+                <!-- Dynamically populated from JSON Database -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Locked Leaderboard State (Visible when logged out) -->
+        <section class="leaderboard-locked-card" id="leaderboard-locked-card">
+          <div class="locked-header">
+            <h2 class="leaderboard-title">Leaderboard</h2>
+            <span class="leaderboard-sub">Restricted to Dialectic Members</span>
+          </div>
+          <div class="locked-content">
+            <p class="locked-desc">Sign in or create an account to view the live leaderboard and record your points.</p>
+            <div class="locked-actions">
+              <button type="button" class="auth-btn auth-btn-secondary" id="locked-signin-btn">Sign In</button>
+              <button type="button" class="auth-btn auth-btn-primary" id="locked-signup-btn">Sign Up</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
   </main>
 
   <!-- Sign In / Sign Up Modal -->

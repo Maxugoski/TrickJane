@@ -53,8 +53,8 @@
       "username": "Plato_2026",
       "passwordHash": "b7e2ee69e88c6255362ffe61af4dfebb07b7d2a94e29ae3b21e936e464262408",
       "createdAt": "2026-10-08T06:41:00.180Z",
-      "bestScore": 0,
-      "bestWordCount": 0
+      "bestScore": 56,
+      "bestWordCount": 5
     }
   ],
   "leaderboard": [
@@ -92,6 +92,14 @@
       "wordCount": 9,
       "phrase": "five lives save prevent catastrophe utilitarian outweigh inaction duty",
       "achievedAt": "2026-10-07T23:14:43.155Z"
+    },
+    {
+      "id": "lb_1791444946365_8rxhr",
+      "username": "Plato_2026",
+      "probability": 56,
+      "wordCount": 5,
+      "phrase": "inaction causes death of five innocent souls",
+      "achievedAt": "2026-10-08T07:36:03.333Z"
     }
   ]
 }

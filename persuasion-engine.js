@@ -1,6 +1,6 @@
-// Persuasion Engine for Single Dilemma: "Should you push the stranger to save five people?"
+// Trick Engine for Single Dilemma: "Should you push the stranger to save five people?"
 
-export class PersuasionEngine {
+export class TrickEngine {
   constructor() {
     this.history = [];
   }
@@ -114,3 +114,5 @@ export class PersuasionEngine {
     return "Jane maintains her posture: 'Your proposition is noted, but my deontological commitment against direct harm remains firm. Give me a deeper ethical counter-weight.'";
   }
 }
+
+export const PersuasionEngine = TrickEngine;

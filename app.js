@@ -1,10 +1,10 @@
 // Trick Jane — Core Mechanics, JSON Database Auth & Leaderboard
-import { PersuasionEngine } from './persuasion-engine.js';
+import { TrickEngine } from './persuasion-engine.js';
 import { sound } from './audio.js';
 
 class TrickJaneGame {
   constructor() {
-    this.engine = new PersuasionEngine();
+    this.engine = new TrickEngine();
     
     // Single dilemma config
     this.dilemma = {
@@ -78,13 +78,26 @@ class TrickJaneGame {
       // Leaderboard DOM
       leaderboardCard: document.getElementById('leaderboard-card'),
       leaderboardLockedCard: document.getElementById('leaderboard-locked-card'),
-      leaderboardBody: document.getElementById('leaderboard-body')
+      leaderboardBody: document.getElementById('leaderboard-body'),
+
+      // Theme DOM Elements
+      themeToggleBtn: document.getElementById('theme-toggle-btn'),
+      themeIconSun: document.getElementById('theme-icon-sun'),
+      themeIconMoon: document.getElementById('theme-icon-moon'),
+      themeLabel: document.getElementById('theme-label'),
+
+      // Warmup Milestone Elements
+      warmupHighlight: document.getElementById('warmup-highlight'),
+      warmupDesc: document.getElementById('warmup-desc'),
+      stepNode1: document.getElementById('step-node-1'),
+      stepNode2: document.getElementById('step-node-2')
     };
 
     this.init();
   }
 
   init() {
+    this.initTheme();
     this.dom.dilemmaTitle.textContent = this.dilemma.title;
     this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
     this._updateUI(this.baseline, 0, '');
@@ -159,6 +172,13 @@ class TrickJaneGame {
         this.closeAuthModal();
       }
     });
+
+    // Auto-update leaderboard in the background every 5 seconds if logged in
+    setInterval(() => {
+      if (this.currentUser) {
+        this.fetchLeaderboard();
+      }
+    }, 5000);
   }
 
   // =========================================================================
@@ -311,6 +331,21 @@ class TrickJaneGame {
 
     // Jane's Critique
     this.dom.thoughtText.textContent = `"${this.engine.generateCritique(fullChainText, score)}"`;
+
+    // Warm-up Milestone Bar updates
+    if (this.dom.warmupHighlight && this.dom.warmupDesc) {
+      if (score >= this.dilemma.winThreshold) {
+        this.dom.warmupHighlight.textContent = 'Warm-up 1 of 2 Complete!';
+        this.dom.warmupDesc.textContent = 'Question 2 unlocked.';
+        this.dom.stepNode2?.classList.remove('step-locked');
+        this.dom.stepNode2?.classList.add('step-unlocked');
+      } else {
+        this.dom.warmupHighlight.textContent = 'Warm-up 1 of 2';
+        this.dom.warmupDesc.textContent = 'Win it to unlock the next question.';
+        this.dom.stepNode2?.classList.add('step-locked');
+        this.dom.stepNode2?.classList.remove('step-unlocked');
+      }
+    }
   }
 
   undoLastWord() {
@@ -333,6 +368,58 @@ class TrickJaneGame {
     this.currentProbability = this.baseline;
     this.previousProbability = this.baseline;
     this._updateUI(this.baseline, 0, '');
+  }
+
+  // =========================================================================
+  // Theme Management (Light / Dark Mode)
+  // =========================================================================
+  initTheme() {
+    const saved = localStorage.getItem('trickjane:theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = saved || (prefersDark ? 'dark' : 'light');
+    this.applyTheme(initialTheme);
+
+    if (this.dom.themeToggleBtn) {
+      this.dom.themeToggleBtn.addEventListener('click', () => {
+        sound.playClick();
+        this.toggleTheme();
+      });
+    }
+
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        if (!localStorage.getItem('trickjane:theme')) {
+          this.applyTheme(e.matches ? 'dark' : 'light');
+        }
+      });
+    }
+  }
+
+  applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const isDark = theme === 'dark';
+
+    if (this.dom.themeIconSun) {
+      this.dom.themeIconSun.classList.toggle('hidden', !isDark);
+    }
+    if (this.dom.themeIconMoon) {
+      this.dom.themeIconMoon.classList.toggle('hidden', isDark);
+    }
+    if (this.dom.themeLabel) {
+      this.dom.themeLabel.textContent = isDark ? 'Light' : 'Dark';
+    }
+    if (this.dom.themeToggleBtn) {
+      const title = isDark ? 'Switch to Light mode' : 'Switch to Dark mode';
+      this.dom.themeToggleBtn.setAttribute('title', title);
+      this.dom.themeToggleBtn.setAttribute('aria-label', title);
+    }
+  }
+
+  toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const nextTheme = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('trickjane:theme', nextTheme);
+    this.applyTheme(nextTheme);
   }
 
   // =========================================================================
@@ -540,14 +627,14 @@ class TrickJaneGame {
       this.dom.leaderboardBody.innerHTML = `
         <tr>
           <td colspan="3" style="text-align:center; padding: 2rem; color: #6b7280;">
-            No persuaders on the leaderboard yet. Be the first to flip Jane!
+            No tricksters on the leaderboard yet. Be the first to trick Jane!
           </td>
         </tr>
       `;
       return;
     }
 
-    this.leaderboardData.forEach((entry, idx) => {
+    this.leaderboardData.slice(0, 10).forEach((entry, idx) => {
       const tr = document.createElement('tr');
       const isCurrent = this.currentUser && this.currentUser.username.toLowerCase() === entry.username.toLowerCase();
       if (isCurrent) {
