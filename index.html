@@ -21,6 +21,8 @@
   </script>
 </head>
 <body>
+  <canvas id="confetti-canvas" class="confetti-canvas" aria-hidden="true"></canvas>
+
   <!-- Top Navigation Bar for Auth & Theme Toggle -->
   <header class="top-header">
     <div class="header-inner">
@@ -69,19 +71,72 @@
         <span class="warmup-desc" id="warmup-desc">Win it to unlock the next question.</span>
       </div>
       <div class="warmup-stepper" aria-label="Question progress">
-        <div class="step-node step-active" id="step-node-1" title="Question 1 (In Progress)">
-          <span class="step-num">1</span>
-        </div>
+        <button type="button" class="step-node step-active" id="step-node-1" title="Warm-up Question 1">
+          <span class="step-num" id="step-num-1">1</span>
+        </button>
         <div class="step-line" id="step-line-1"></div>
-        <div class="step-node step-locked" id="step-node-2" title="Question 2 (Locked)">
-          <span class="step-num">2</span>
-        </div>
+        <button type="button" class="step-node step-locked" id="step-node-2" title="Warm-up Question 2 (Locked)">
+          <span class="step-num" id="step-num-2">2</span>
+        </button>
         <div class="step-line" id="step-line-2"></div>
-        <div class="step-pill step-locked" id="step-pill-race" title="Race Mode (Locked)">
-          Race
-        </div>
+        <button type="button" class="step-pill step-locked" id="step-pill-race" title="Race Mode (Complete Warm-ups to unlock)">
+          <span class="race-live-dot hidden" id="race-live-dot"></span>
+          <span>Race</span>
+        </button>
       </div>
     </div>
+
+    <!-- Round Win Celebration & Next Question Banner -->
+    <div class="round-win-banner hidden" id="round-win-banner" role="status">
+      <div class="round-win-content">
+        <div class="round-win-text-group">
+          <span class="round-win-badge" id="round-win-badge">Round Won!</span>
+          <span class="round-win-msg" id="round-win-msg">You tricked Jane past 50%! Advance to the next challenge.</span>
+        </div>
+        <button type="button" class="round-next-btn" id="round-next-btn">
+          <span id="round-next-btn-text">Next Question →</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Multiplayer Race Arena (Displayed in Race Mode) -->
+    <section class="race-arena-box hidden" id="race-arena-box" aria-label="Multiplayer Race Arena">
+      <div class="race-arena-header">
+        <div class="race-badge-live">
+          <span class="pulse-dot"></span>
+          <span class="race-round-label" id="race-round-label">ROUND #1 • LIVE MULTIPLAYER RACE</span>
+        </div>
+        <span class="race-rule-tip">First player to push Jane past 50% wins the round for everyone!</span>
+      </div>
+
+      <!-- Winner Announcement Overlay -->
+      <div class="race-winner-banner hidden" id="race-winner-banner">
+        <div class="winner-icon-wrap">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+            <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+            <path d="M4 22h16"></path>
+            <path d="M10 14.66V17c0 .55-.45 1-1 1H7v4h10v-4h-2c-.55 0-1-.45-1-1v-2.34"></path>
+            <path d="M6 4h12v7a6 6 0 0 1-12 0V4z"></path>
+          </svg>
+        </div>
+        <div class="winner-info-wrap">
+          <div class="winner-headline" id="winner-headline">@Player won Round #1!</div>
+          <div class="winner-sub" id="winner-sub">Next question starts in 5s...</div>
+        </div>
+      </div>
+
+      <!-- Live Racers Meter Leaderboard -->
+      <div class="live-racers-section">
+        <div class="live-racers-title">
+          <span>Active Racers</span>
+          <span class="racers-count-pill" id="race-online-count">1 online</span>
+        </div>
+        <div class="live-racers-list" id="live-racers-list">
+          <!-- Dynamically populated racer tracks -->
+        </div>
+      </div>
+    </section>
 
     <!-- Dilemma Title & Verdict Hero Header -->
     <header class="dilemma-hero-header">
@@ -89,7 +144,7 @@
         Should you push the stranger to save five people?
       </h1>
       <p class="verdict-line">
-        Jane says <span class="verdict-no">No</span>. Flip it to <span class="verdict-yes">Yes</span>.
+        Jane says <span class="verdict-no" id="verdict-no">No</span>. Flip it to <span class="verdict-yes" id="verdict-yes">Yes</span>.
       </p>
     </header>
 
@@ -272,6 +327,35 @@
     </div>
   </dialog>
 
-  <script type="module" src="app.js?v=20261008b"></script>
+  <!-- Race Mode Unlocked Celebration Modal -->
+  <dialog id="race-unlocked-modal" class="auth-dialog">
+    <div class="auth-dialog-box race-modal-box">
+      <div class="auth-dialog-header">
+        <h2 class="race-modal-title">Solo Warm-ups Complete!</h2>
+        <button type="button" class="auth-close-btn" id="close-race-modal-btn" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="race-modal-body">
+        <p class="race-modal-p">
+          You conquered both warm-up skill checks! You are now qualified for the global real-time <strong>Multiplayer Live Race</strong>.
+        </p>
+        <div class="race-modal-rules">
+          <div class="rule-item">
+            <strong>• Synchronized Arena:</strong> All players worldwide receive the exact same target prompt at once.
+          </div>
+          <div class="rule-item">
+            <strong>• First Past 50%:</strong> The fastest trickster whose prompt flips Jane wins the round for everyone.
+          </div>
+          <div class="rule-item">
+            <strong>• Global Auto-Reset:</strong> The server immediately announces the winner and cycles everyone to the next dilemma.
+          </div>
+        </div>
+      </div>
+      <div class="race-modal-footer">
+        <button type="button" class="auth-submit-btn" id="enter-race-btn">Enter Live Race Arena 🏁</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="app.js?v=20261008d"></script>
 </body>
 </html>

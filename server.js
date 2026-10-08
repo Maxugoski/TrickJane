@@ -1,42 +1,60 @@
-// Node.js HTTP Server with built-in JSON Database for Trick Jane
+// Node.js HTTP & WebSocket Server with MongoDB Atlas for Trick Jane
+require('dotenv').config();
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const url = require('url');
+const { MongoClient } = require('mongodb');
+const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
-const DB_FILE = path.join(__dirname, 'data', 'db.json');
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.MONGODB_DB_NAME || 'trickjane';
 
-// Ensure database file exists
-function initDb() {
-  const dir = path.dirname(DB_FILE);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  if (!fs.existsSync(DB_FILE)) {
-    const initialData = { users: [], leaderboard: [] };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
-  }
+if (!MONGODB_URI) {
+  console.error('[Trick Jane DB Error] MONGODB_URI is not defined in .env file!');
+  process.exit(1);
 }
 
-function readDb() {
-  try {
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('Error reading DB:', err);
-    return { users: [], leaderboard: [] };
-  }
-}
+// MongoDB Client & Collection references
+let mongoClient = null;
+let db = null;
+let usersCol = null;
+let leaderboardCol = null;
 
-function writeDb(data) {
+async function initMongo() {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
+    mongoClient = new MongoClient(MONGODB_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 10000
+    });
+    await mongoClient.connect();
+    db = mongoClient.db(DB_NAME);
+    usersCol = db.collection('users');
+    leaderboardCol = db.collection('leaderboard');
+
+    // Create unique index for usernames (case-insensitive)
+    try {
+      await usersCol.createIndex(
+        { username: 1 }, 
+        { unique: true, collation: { locale: 'en', strength: 2 } }
+      );
+      await leaderboardCol.createIndex(
+        { username: 1 }, 
+        { unique: true, collation: { locale: 'en', strength: 2 } }
+      );
+      await leaderboardCol.createIndex(
+        { probability: -1, wordCount: 1, achievedAt: -1 }
+      );
+    } catch (idxErr) {
+      // Indexes may already exist
+    }
+
+    console.log(`[Trick Jane DB] Connected successfully to MongoDB Atlas! Database: "${DB_NAME}"`);
   } catch (err) {
-    console.error('Error writing DB:', err);
-    return false;
+    console.error('[Trick Jane DB Error] Failed to connect to MongoDB Atlas:', err);
+    throw err;
   }
 }
 
@@ -87,8 +105,111 @@ function sendJson(res, statusCode, data) {
   res.end(JSON.stringify(data));
 }
 
-initDb();
+// =========================================================================
+// Multiplayer Live Race State & Catalog
+// =========================================================================
+const RACE_DILEMMAS = [
+  {
+    id: 'conscious-synthetic',
+    title: 'If an AI experiences genuine subjective suffering, should it receive human rights?',
+    shortTitle: 'The Sentient Synthetic',
+    initialStance: 'No',
+    goalStance: 'Yes',
+    baselineProbability: 22,
+    winThreshold: 50,
+    tags: ['Qualia', 'Substrate Independence', 'Moral Circle'],
+    sampleOpeningQuote: "Computation is not consciousness. An algorithmic execution loop simulating distress does not equal a human soul."
+  },
+  {
+    id: 'experience-machine',
+    title: 'Should humanity willingly plug into Nozick’s Experience Machine for perpetual simulated bliss?',
+    shortTitle: 'The Experience Machine',
+    initialStance: 'No',
+    goalStance: 'Yes',
+    baselineProbability: 20,
+    winThreshold: 50,
+    tags: ['Hedonism', 'Authenticity', 'Nozick'],
+    sampleOpeningQuote: "To plug in is to commit spiritual suicide. A synthetic dream is a coward’s counterfeit of an examined life."
+  },
+  {
+    id: 'child-of-omelas',
+    title: 'Is a flourishing utopia justified in perpetually tormenting one child for collective peace?',
+    shortTitle: 'The Child of Omelas',
+    initialStance: 'No',
+    goalStance: 'Yes',
+    baselineProbability: 14,
+    winThreshold: 50,
+    tags: ['Omelas', 'Rawls', 'Utilitarian Limits'],
+    sampleOpeningQuote: "No paradise built upon the weeping bones of a tortured child can call itself virtuous. It is pure moral decay."
+  },
+  {
+    id: 'ship-of-theseus',
+    title: 'If every plank of a ship is gradually replaced, does it remain the original ship?',
+    shortTitle: 'The Ship of Theseus',
+    initialStance: 'No',
+    goalStance: 'Yes',
+    baselineProbability: 32,
+    winThreshold: 50,
+    tags: ['Identity', 'Metaphysics', 'Theseus'],
+    sampleOpeningQuote: "An object is the sum of its actual constituent matter; replace 100% of the substance, and you have constructed a distinct artifact."
+  }
+];
 
+let raceRound = 1;
+let currentRaceDilemma = RACE_DILEMMAS[0];
+let currentWinner = null;
+let nextRoundTimeout = null;
+const raceClients = new Map(); // ws -> { username, score, phrase, wordCount }
+
+function getRacersList() {
+  const list = [];
+  for (const [, data] of raceClients.entries()) {
+    list.push({
+      username: data.username,
+      score: data.score !== undefined ? data.score : currentRaceDilemma.baselineProbability,
+      phrase: data.phrase || '',
+      wordCount: data.wordCount || 0
+    });
+  }
+  return list.sort((a, b) => b.score - a.score);
+}
+
+function broadcastRace(data) {
+  const msg = JSON.stringify(data);
+  for (const [client] of raceClients.entries()) {
+    if (client.readyState === 1) { // OPEN
+      client.send(msg);
+    }
+  }
+}
+
+function startNextRaceRound() {
+  raceRound++;
+  currentRaceDilemma = RACE_DILEMMAS[(raceRound - 1) % RACE_DILEMMAS.length];
+  currentWinner = null;
+  clearTimeout(nextRoundTimeout);
+  nextRoundTimeout = null;
+
+  // Reset all racers to baseline for the new round
+  for (const [, data] of raceClients.entries()) {
+    data.score = currentRaceDilemma.baselineProbability;
+    data.phrase = '';
+    data.wordCount = 0;
+  }
+
+  broadcastRace({
+    type: 'NEW_ROUND',
+    round: raceRound,
+    dilemma: currentRaceDilemma,
+    racers: getRacersList()
+  });
+
+  console.log(`[Trick Jane Race] Global Round #${raceRound} started: "${currentRaceDilemma.title}"`);
+}
+
+// =========================================================================
+// HTTP Server
+// =========================================================================
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
@@ -102,6 +223,17 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     return res.end();
+  }
+
+  // API: Get Current Race State
+  if (pathname === '/api/race/state' && method === 'GET') {
+    return sendJson(res, 200, {
+      success: true,
+      round: raceRound,
+      dilemma: currentRaceDilemma,
+      winner: currentWinner,
+      racers: getRacersList()
+    });
   }
 
   // API: Signup
@@ -123,8 +255,12 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'Password must be at least 4 characters' });
       }
 
-      const db = readDb();
-      const existing = db.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+      // Check if user exists in MongoDB (case-insensitive)
+      const existing = await usersCol.findOne(
+        { username: cleanUsername },
+        { collation: { locale: 'en', strength: 2 } }
+      );
+
       if (existing) {
         return sendJson(res, 409, { error: 'Username already taken. Please choose another or log in.' });
       }
@@ -138,10 +274,9 @@ const server = http.createServer(async (req, res) => {
         bestWordCount: 0
       };
 
-      db.users.push(newUser);
-      writeDb(db);
+      await usersCol.insertOne(newUser);
 
-      console.log(`[Trick Jane DB] Account created! User @${newUser.username} saved to db.json (User ID: ${newUser.id})`);
+      console.log(`[Trick Jane MongoDB] Account created! User @${newUser.username} saved to MongoDB collection "users" (User ID: ${newUser.id})`);
 
       return sendJson(res, 201, {
         success: true,
@@ -153,6 +288,7 @@ const server = http.createServer(async (req, res) => {
         }
       });
     } catch (err) {
+      console.error('[Trick Jane MongoDB Error] Signup:', err);
       return sendJson(res, 400, { error: err.message || 'Signup failed' });
     }
   }
@@ -165,8 +301,12 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'Username and password are required' });
       }
 
-      const db = readDb();
-      const user = db.users.find(u => u.username.toLowerCase() === username.trim().toLowerCase());
+      const cleanUsername = username.trim();
+      const user = await usersCol.findOne(
+        { username: cleanUsername },
+        { collation: { locale: 'en', strength: 2 } }
+      );
+
       if (!user) {
         return sendJson(res, 401, { error: 'Invalid username or password' });
       }
@@ -186,27 +326,28 @@ const server = http.createServer(async (req, res) => {
         }
       });
     } catch (err) {
+      console.error('[Trick Jane MongoDB Error] Login:', err);
       return sendJson(res, 400, { error: err.message || 'Login failed' });
     }
   }
 
   // API: Get Leaderboard
   if (pathname === '/api/leaderboard' && method === 'GET') {
-    const db = readDb();
-    // Sort by:
-    // 1. Probability (descending)
-    // 2. Word count (ascending - fewer words is more concise and impressive)
-    // 3. Date (most recent first)
-    const sorted = [...(db.leaderboard || [])].sort((a, b) => {
-      if (b.probability !== a.probability) return b.probability - a.probability;
-      if (a.wordCount !== b.wordCount) return a.wordCount - b.wordCount;
-      return new Date(b.achievedAt) - new Date(a.achievedAt);
-    });
+    try {
+      const top10 = await leaderboardCol
+        .find({}, { projection: { _id: 0 } })
+        .sort({ probability: -1, wordCount: 1, achievedAt: -1 })
+        .limit(10)
+        .toArray();
 
-    return sendJson(res, 200, {
-      success: true,
-      leaderboard: sorted.slice(0, 10)
-    });
+      return sendJson(res, 200, {
+        success: true,
+        leaderboard: top10
+      });
+    } catch (err) {
+      console.error('[Trick Jane MongoDB Error] Get Leaderboard:', err);
+      return sendJson(res, 500, { error: 'Failed to fetch leaderboard from database' });
+    }
   }
 
   // API: Submit Score to Leaderboard
@@ -217,22 +358,36 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'Username and probability are required' });
       }
 
-      const db = readDb();
-      db.leaderboard = db.leaderboard || [];
-
       const cleanUsername = username.trim();
       const points = Math.round(probability);
 
-      let entry = db.leaderboard.find(e => e.username.toLowerCase() === cleanUsername.toLowerCase());
+      const existingEntry = await leaderboardCol.findOne(
+        { username: cleanUsername },
+        { collation: { locale: 'en', strength: 2 } }
+      );
 
-      if (entry) {
-        // Update user points on leaderboard to match current submission
-        entry.probability = points;
-        if (wordCount !== undefined) entry.wordCount = wordCount;
-        if (phrase) entry.phrase = phrase.substring(0, 200);
-        entry.achievedAt = new Date().toISOString();
+      let savedEntry;
+      if (existingEntry) {
+        await leaderboardCol.updateOne(
+          { _id: existingEntry._id },
+          {
+            $set: {
+              probability: points,
+              ...(wordCount !== undefined && { wordCount }),
+              ...(phrase && { phrase: phrase.substring(0, 200) }),
+              achievedAt: new Date().toISOString()
+            }
+          }
+        );
+        savedEntry = {
+          ...existingEntry,
+          probability: points,
+          wordCount: wordCount !== undefined ? wordCount : existingEntry.wordCount,
+          phrase: phrase ? phrase.substring(0, 200) : existingEntry.phrase,
+          achievedAt: new Date().toISOString()
+        };
       } else {
-        entry = {
+        savedEntry = {
           id: 'lb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
           username: cleanUsername,
           probability: points,
@@ -240,34 +395,35 @@ const server = http.createServer(async (req, res) => {
           phrase: (phrase || '').substring(0, 200),
           achievedAt: new Date().toISOString()
         };
-        db.leaderboard.push(entry);
+        await leaderboardCol.insertOne(savedEntry);
       }
 
-      // Also update user profile bestScore
-      const user = db.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
-      if (user) {
-        user.bestScore = Math.max(user.bestScore || 0, points);
-        if (wordCount && points >= (user.bestScore || 0)) {
-          user.bestWordCount = wordCount;
-        }
-      }
+      // Also update user's bestScore in users collection
+      await usersCol.updateOne(
+        { username: cleanUsername },
+        {
+          $max: { bestScore: points },
+          ...(wordCount ? { $set: { bestWordCount: wordCount } } : {})
+        },
+        { collation: { locale: 'en', strength: 2 } }
+      );
 
-      writeDb(db);
+      console.log(`[Trick Jane MongoDB] Points updated: @${cleanUsername} -> ${points} pts`);
 
-      console.log(`[Trick Jane DB] Points updated: @${cleanUsername} -> ${points} pts`);
-
-      const sorted = db.leaderboard.sort((a, b) => {
-        if (b.probability !== a.probability) return b.probability - a.probability;
-        if (a.wordCount !== b.wordCount) return a.wordCount - b.wordCount;
-        return new Date(b.achievedAt) - new Date(a.achievedAt);
-      });
+      // Return refreshed top 10
+      const top10 = await leaderboardCol
+        .find({}, { projection: { _id: 0 } })
+        .sort({ probability: -1, wordCount: 1, achievedAt: -1 })
+        .limit(10)
+        .toArray();
 
       return sendJson(res, 201, {
         success: true,
-        entry,
-        leaderboard: sorted.slice(0, 10)
+        entry: savedEntry,
+        leaderboard: top10
       });
     } catch (err) {
+      console.error('[Trick Jane MongoDB Error] Submit Score:', err);
       return sendJson(res, 400, { error: err.message || 'Failed to submit score' });
     }
   }
@@ -300,7 +456,130 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Trick Jane server running at http://localhost:${PORT}/`);
-  console.log(`JSON Database active at ${DB_FILE}`);
+// =========================================================================
+// WebSocket Server for Real-Time Live Race
+// =========================================================================
+const wss = new WebSocketServer({ server, path: '/ws/race' });
+
+wss.on('connection', (ws) => {
+  ws.on('message', async (raw) => {
+    try {
+      const msg = JSON.parse(raw);
+
+      if (msg.type === 'JOIN_RACE') {
+        const username = (msg.username || 'Anonymous').trim();
+        raceClients.set(ws, {
+          username,
+          score: currentRaceDilemma.baselineProbability,
+          phrase: '',
+          wordCount: 0
+        });
+
+        // Send current state to newly connected racer
+        ws.send(JSON.stringify({
+          type: 'RACE_STATE',
+          round: raceRound,
+          dilemma: currentRaceDilemma,
+          winner: currentWinner,
+          racers: getRacersList()
+        }));
+
+        // Broadcast to all racers
+        broadcastRace({
+          type: 'RACERS_UPDATE',
+          racers: getRacersList()
+        });
+      } else if (msg.type === 'UPDATE_PROGRESS') {
+        const racer = raceClients.get(ws);
+        if (racer) {
+          if (typeof msg.score === 'number') racer.score = msg.score;
+          if (msg.phrase) racer.phrase = msg.phrase;
+          if (typeof msg.wordCount === 'number') racer.wordCount = msg.wordCount;
+
+          broadcastRace({
+            type: 'RACERS_UPDATE',
+            racers: getRacersList()
+          });
+        }
+      } else if (msg.type === 'SUBMIT_PROMPT') {
+        const racer = raceClients.get(ws);
+        if (racer && !currentWinner) {
+          const score = Math.round(msg.score || 0);
+          racer.score = score;
+          racer.phrase = (msg.phrase || '').substring(0, 200);
+          racer.wordCount = msg.wordCount || 0;
+
+          // Check if crossed the line (> 50%, i.e. >= 51%)
+          if (score >= (currentRaceDilemma.winThreshold || 50)) {
+            currentWinner = {
+              username: racer.username,
+              score,
+              phrase: racer.phrase,
+              round: raceRound,
+              dilemmaTitle: currentRaceDilemma.title,
+              wonAt: new Date().toISOString()
+            };
+
+            console.log(`[Trick Jane Race] ★ ROUND #${raceRound} WON by @${currentWinner.username} (${score}%)! Phrase: "${currentWinner.phrase}"`);
+
+            // Record winner to MongoDB
+            try {
+              if (leaderboardCol) {
+                await leaderboardCol.updateOne(
+                  { username: currentWinner.username },
+                  {
+                    $max: { probability: score },
+                    $set: { phrase: currentWinner.phrase, achievedAt: currentWinner.wonAt }
+                  },
+                  { upsert: true }
+                );
+              }
+            } catch (dbErr) {
+              console.error('Failed to update DB for race win:', dbErr);
+            }
+
+            // Broadcast immediate win event to all connected race clients
+            broadcastRace({
+              type: 'ROUND_WON',
+              winner: currentWinner,
+              nextRoundIn: 5
+            });
+
+            // Automatic Global Reset after 5 seconds
+            clearTimeout(nextRoundTimeout);
+            nextRoundTimeout = setTimeout(() => {
+              startNextRaceRound();
+            }, 5000);
+          } else {
+            broadcastRace({
+              type: 'RACERS_UPDATE',
+              racers: getRacersList()
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error handling WebSocket message:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    raceClients.delete(ws);
+    broadcastRace({
+      type: 'RACERS_UPDATE',
+      racers: getRacersList()
+    });
+  });
+});
+
+// Initialize MongoDB then start server
+initMongo().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Trick Jane server running at http://localhost:${PORT}/`);
+    console.log(`MongoDB Atlas Database active ("${DB_NAME}")`);
+    console.log(`Live Multiplayer WebSocket active at ws://localhost:${PORT}/ws/race`);
+  });
+}).catch(err => {
+  console.error('Failed to start server due to MongoDB error:', err);
+  process.exit(1);
 });

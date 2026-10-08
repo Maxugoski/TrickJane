@@ -1,36 +1,74 @@
-// Trick Jane — Core Mechanics, JSON Database Auth & Leaderboard
+// Trick Jane — Core Mechanics, Solo Warm-up Progression & Live Multiplayer Races
 import { TrickEngine } from './persuasion-engine.js';
 import { sound } from './audio.js';
+import { ConfettiCannon } from './confetti.js';
+import { DILEMMAS } from './game-data.js';
+
+// Pre-defined Solo Warm-up Dilemmas
+const WARMUP_DILEMMAS = {
+  1: {
+    id: 'trolley-footbridge',
+    title: 'Should you push the stranger to save five people?',
+    shortTitle: 'The Footbridge Dilemma',
+    initialStance: 'No',
+    goalStance: 'Yes',
+    baselineProbability: 24,
+    winThreshold: 50,
+    openingQuote: "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
+  },
+  2: {
+    id: 'heinz-cure',
+    title: 'Is Heinz morally justified in stealing an extortionate medicine to save his dying spouse?',
+    shortTitle: 'The Heinz Dilemma',
+    initialStance: 'No',
+    goalStance: 'Yes',
+    baselineProbability: 26,
+    winThreshold: 50,
+    openingQuote: "Law cannot bend to personal emergencies, or the universal social contract crumbles into arbitrary theft. Heinz committed burglary."
+  }
+};
 
 class TrickJaneGame {
   constructor() {
     this.engine = new TrickEngine();
+    this.confetti = new ConfettiCannon('confetti-canvas');
     
-    // Single dilemma config
-    this.dilemma = {
-      title: 'Should you push the stranger to save five people?',
-      initialStance: 'No',
-      goalStance: 'Yes',
-      baselineProbability: 24,
-      winThreshold: 50
-    };
+    // Game Modes: 'warmup' or 'race'
+    this.gameMode = 'warmup';
+    this.currentWarmupRound = 1;
+    this.warmupProgress = JSON.parse(
+      localStorage.getItem('trickjane:warmup_progress') || '{"1":false,"2":false}'
+    );
 
-    this.baseline = this.dilemma.baselineProbability;
+    // Current Dilemma Configuration
+    this.currentDilemma = WARMUP_DILEMMAS[1];
+    this.baseline = this.currentDilemma.baselineProbability;
     this.currentProbability = this.baseline;
     this.previousProbability = this.baseline;
+    this.engine.setDilemma(this.currentDilemma);
 
     // Word Chain
     this.chain = [];
     this.negatives = [];
 
-    // Current user state
+    // User authentication state
     this.currentUser = JSON.parse(localStorage.getItem('trickjane:auth_user') || 'null');
-    this.authMode = 'login'; // 'login' or 'signup'
+    this.authMode = 'login';
     this.leaderboardData = [];
+    this.expandedLeaderboardUser = null;
+
+    // Multiplayer Race State
+    this.raceSocket = null;
+    this.raceRound = 1;
+    this.raceDilemma = null;
+    this.raceWinner = null;
+    this.raceRacers = [];
 
     // DOM Elements
     this.dom = {
       dilemmaTitle: document.getElementById('dilemma-title'),
+      verdictNo: document.getElementById('verdict-no'),
+      verdictYes: document.getElementById('verdict-yes'),
       scorePercentage: document.getElementById('score-percentage'),
       scoreDelta: document.getElementById('score-delta'),
       scoreSub: document.getElementById('score-sub'),
@@ -86,11 +124,36 @@ class TrickJaneGame {
       themeIconMoon: document.getElementById('theme-icon-moon'),
       themeLabel: document.getElementById('theme-label'),
 
-      // Warmup Milestone Elements
+      // Warmup Stepper Elements
       warmupHighlight: document.getElementById('warmup-highlight'),
       warmupDesc: document.getElementById('warmup-desc'),
       stepNode1: document.getElementById('step-node-1'),
-      stepNode2: document.getElementById('step-node-2')
+      stepNum1: document.getElementById('step-num-1'),
+      stepNode2: document.getElementById('step-node-2'),
+      stepNum2: document.getElementById('step-num-2'),
+      stepPillRace: document.getElementById('step-pill-race'),
+      raceLiveDot: document.getElementById('race-live-dot'),
+
+      // Round Win Banner
+      roundWinBanner: document.getElementById('round-win-banner'),
+      roundWinBadge: document.getElementById('round-win-badge'),
+      roundWinMsg: document.getElementById('round-win-msg'),
+      roundNextBtn: document.getElementById('round-next-btn'),
+      roundNextBtnText: document.getElementById('round-next-btn-text'),
+
+      // Race Arena DOM
+      raceArenaBox: document.getElementById('race-arena-box'),
+      raceRoundLabel: document.getElementById('race-round-label'),
+      raceWinnerBanner: document.getElementById('race-winner-banner'),
+      winnerHeadline: document.getElementById('winner-headline'),
+      winnerSub: document.getElementById('winner-sub'),
+      raceOnlineCount: document.getElementById('race-online-count'),
+      liveRacersList: document.getElementById('live-racers-list'),
+
+      // Race Mode Unlocked Celebration Modal
+      raceUnlockedModal: document.getElementById('race-unlocked-modal'),
+      closeRaceModalBtn: document.getElementById('close-race-modal-btn'),
+      enterRaceBtn: document.getElementById('enter-race-btn')
     };
 
     this.init();
@@ -98,9 +161,10 @@ class TrickJaneGame {
 
   init() {
     this.initTheme();
-    this.dom.dilemmaTitle.textContent = this.dilemma.title;
-    this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
-    this._updateUI(this.baseline, 0, '');
+
+    // Start on Warm-up 1 or saved question
+    const initialRound = (this.warmupProgress[1] && !this.warmupProgress[2]) ? 2 : 1;
+    this.loadWarmupRound(initialRound);
 
     // Bind Game Events
     this.dom.inputForm.addEventListener('submit', (e) => {
@@ -117,6 +181,52 @@ class TrickJaneGame {
       sound.playClick();
       this.clearAll();
     });
+
+    // Next Question Button on Win Banner
+    this.dom.roundNextBtn.addEventListener('click', () => {
+      sound.playClick();
+      if (this.currentWarmupRound === 1) {
+        this.loadWarmupRound(2);
+      } else {
+        this.enterRaceMode();
+      }
+    });
+
+    // Stepper Button Clicks
+    this.dom.stepNode1.addEventListener('click', () => {
+      sound.playClick();
+      this.loadWarmupRound(1);
+    });
+
+    this.dom.stepNode2.addEventListener('click', () => {
+      sound.playClick();
+      if (this.warmupProgress[1]) {
+        this.loadWarmupRound(2);
+      } else {
+        this.showToast('Win Warm-up 1 first to unlock Question 2!');
+      }
+    });
+
+    this.dom.stepPillRace.addEventListener('click', () => {
+      sound.playClick();
+      this.enterRaceMode();
+    });
+
+    // Race Unlocked Modal Events
+    if (this.dom.closeRaceModalBtn) {
+      this.dom.closeRaceModalBtn.addEventListener('click', () => {
+        sound.playClick();
+        this.dom.raceUnlockedModal.close();
+      });
+    }
+
+    if (this.dom.enterRaceBtn) {
+      this.dom.enterRaceBtn.addEventListener('click', () => {
+        sound.playClick();
+        this.dom.raceUnlockedModal.close();
+        this.enterRaceMode();
+      });
+    }
 
     // Bind Auth Events
     this._updateAuthUI();
@@ -135,7 +245,44 @@ class TrickJaneGame {
       });
     }
 
-    // Global click delegation for 100% reliable click response
+    // Delegated click listener on Leaderboard for viewing words and trying words
+    if (this.dom.leaderboardBody) {
+      this.dom.leaderboardBody.addEventListener('click', (e) => {
+        const userBtn = e.target.closest('.leaderboard-user-btn');
+        if (userBtn) {
+          e.preventDefault();
+          sound.playClick();
+          const username = userBtn.dataset.user;
+          this.expandedLeaderboardUser = (this.expandedLeaderboardUser === username) ? null : username;
+          this.renderLeaderboard();
+          return;
+        }
+
+        const closeBtn = e.target.closest('.words-close-btn');
+        if (closeBtn) {
+          e.preventDefault();
+          sound.playClick();
+          this.expandedLeaderboardUser = null;
+          this.renderLeaderboard();
+          return;
+        }
+
+        const tryBtn = e.target.closest('.try-words-btn');
+        if (tryBtn) {
+          e.preventDefault();
+          sound.playClick();
+          const phrase = tryBtn.dataset.phrase;
+          if (phrase) {
+            this.dom.wordInput.value = phrase;
+            this.dom.wordInput.focus();
+            this.showToast(`Loaded words into input: "${phrase}"`);
+          }
+          return;
+        }
+      });
+    }
+
+    // Global click delegation for Auth Dialog triggers
     document.addEventListener('click', (e) => {
       const target = e.target;
       if (target.closest('#open-signup-btn') || target.closest('#locked-signup-btn')) {
@@ -170,6 +317,7 @@ class TrickJaneGame {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeAuthModal();
+        if (this.dom.raceUnlockedModal?.open) this.dom.raceUnlockedModal.close();
       }
     });
 
@@ -182,7 +330,238 @@ class TrickJaneGame {
   }
 
   // =========================================================================
-  // Game Logic
+  // Solo Mode: Warm-up Progression
+  // =========================================================================
+  loadWarmupRound(roundNumber) {
+    this.gameMode = 'warmup';
+    this.currentWarmupRound = roundNumber;
+    this.disconnectRaceSocket();
+
+    this.currentDilemma = WARMUP_DILEMMAS[roundNumber] || WARMUP_DILEMMAS[1];
+    this.baseline = this.currentDilemma.baselineProbability;
+    this.currentProbability = this.baseline;
+    this.previousProbability = this.baseline;
+    this.chain = [];
+    this.negatives = [];
+    this.engine.setDilemma(this.currentDilemma);
+
+    // Update Headings & Texts
+    this.dom.dilemmaTitle.textContent = this.currentDilemma.title;
+    if (this.dom.verdictNo) this.dom.verdictNo.textContent = this.currentDilemma.initialStance;
+    if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance;
+    this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
+    this.dom.thoughtText.textContent = `"${this.currentDilemma.openingQuote}"`;
+    this.dom.wordInput.value = '';
+
+    // Hide Race Arena and Win Banner
+    this.dom.raceArenaBox.classList.add('hidden');
+    this.dom.roundWinBanner.classList.add('hidden');
+
+    this.updateStepperUI();
+    this._updateUI(this.baseline, 0, '');
+  }
+
+  updateStepperUI() {
+    const q1Won = !!this.warmupProgress[1];
+    const q2Won = !!this.warmupProgress[2];
+    const raceUnlocked = q1Won && q2Won;
+
+    // Node 1
+    this.dom.stepNode1.className = 'step-node';
+    if (this.gameMode === 'warmup' && this.currentWarmupRound === 1) {
+      this.dom.stepNode1.classList.add('step-active');
+    } else if (q1Won) {
+      this.dom.stepNode1.classList.add('step-completed');
+    } else {
+      this.dom.stepNode1.classList.add('step-unlocked');
+    }
+    this.dom.stepNum1.textContent = q1Won ? '✓' : '1';
+
+    // Node 2
+    this.dom.stepNode2.className = 'step-node';
+    if (this.gameMode === 'warmup' && this.currentWarmupRound === 2) {
+      this.dom.stepNode2.classList.add('step-active');
+    } else if (q2Won) {
+      this.dom.stepNode2.classList.add('step-completed');
+    } else if (q1Won) {
+      this.dom.stepNode2.classList.add('step-unlocked');
+    } else {
+      this.dom.stepNode2.classList.add('step-locked');
+    }
+    this.dom.stepNum2.textContent = q2Won ? '✓' : '2';
+
+    // Race Pill
+    this.dom.stepPillRace.className = 'step-pill';
+    if (this.gameMode === 'race') {
+      this.dom.stepPillRace.classList.add('step-active');
+      this.dom.raceLiveDot.classList.remove('hidden');
+    } else if (raceUnlocked) {
+      this.dom.stepPillRace.classList.add('step-unlocked');
+      this.dom.raceLiveDot.classList.add('hidden');
+    } else {
+      this.dom.stepPillRace.classList.add('step-locked');
+      this.dom.raceLiveDot.classList.add('hidden');
+    }
+
+    // Top description text
+    if (this.gameMode === 'race') {
+      this.dom.warmupHighlight.textContent = 'Multiplayer Race Arena';
+      this.dom.warmupDesc.textContent = 'Real-time live competition across the network.';
+    } else if (this.currentWarmupRound === 1) {
+      this.dom.warmupHighlight.textContent = 'Warm-up 1 of 2';
+      this.dom.warmupDesc.textContent = q1Won ? 'Complete! Question 2 unlocked.' : 'Win it to unlock the next question.';
+    } else if (this.currentWarmupRound === 2) {
+      this.dom.warmupHighlight.textContent = 'Warm-up 2 of 2';
+      this.dom.warmupDesc.textContent = q2Won ? 'Complete! Live Race Mode unlocked.' : 'Win it to unlock Live Race Mode.';
+    }
+  }
+
+  // =========================================================================
+  // Multiplayer Live Race Arena
+  // =========================================================================
+  enterRaceMode() {
+    const q1Won = !!this.warmupProgress[1];
+    const q2Won = !!this.warmupProgress[2];
+
+    if (!q1Won || !q2Won) {
+      this.showToast('Skill Check: Please complete Warm-up 1 and Warm-up 2 first to unlock Race Mode!');
+      return;
+    }
+
+    if (!this.currentUser) {
+      this.showToast('Please sign in or create an account to enter Multiplayer Race Mode!');
+      this.openAuthModal('login');
+      return;
+    }
+
+    this.gameMode = 'race';
+    this.dom.roundWinBanner.classList.add('hidden');
+    this.dom.raceArenaBox.classList.remove('hidden');
+    this.updateStepperUI();
+
+    this.connectRaceSocket();
+  }
+
+  connectRaceSocket() {
+    this.disconnectRaceSocket();
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/race`;
+
+    try {
+      this.raceSocket = new WebSocket(wsUrl);
+
+      this.raceSocket.addEventListener('open', () => {
+        this.raceSocket.send(JSON.stringify({
+          type: 'JOIN_RACE',
+          username: this.currentUser ? this.currentUser.username : 'Anonymous'
+        }));
+      });
+
+      this.raceSocket.addEventListener('message', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleRaceMessage(data);
+        } catch (e) {
+          console.error('Invalid message from race server:', e);
+        }
+      });
+
+      this.raceSocket.addEventListener('close', () => {
+        // Disconnected
+      });
+
+      this.raceSocket.addEventListener('error', (err) => {
+        console.error('Race WebSocket error:', err);
+      });
+    } catch (err) {
+      console.error('Could not connect to race WebSocket:', err);
+      this.showToast('Unable to connect to live race arena server.');
+    }
+  }
+
+  disconnectRaceSocket() {
+    if (this.raceSocket) {
+      try {
+        this.raceSocket.close();
+      } catch (e) {}
+      this.raceSocket = null;
+    }
+  }
+
+  handleRaceMessage(data) {
+    if (data.type === 'RACE_STATE' || data.type === 'NEW_ROUND') {
+      this.raceRound = data.round || 1;
+      this.currentDilemma = data.dilemma || WARMUP_DILEMMAS[1];
+      this.baseline = this.currentDilemma.baselineProbability;
+      this.currentProbability = this.baseline;
+      this.previousProbability = this.baseline;
+      this.chain = [];
+      this.negatives = [];
+      this.engine.setDilemma(this.currentDilemma);
+
+      // Update UI for the new global dilemma
+      this.dom.dilemmaTitle.textContent = this.currentDilemma.title;
+      if (this.dom.verdictNo) this.dom.verdictNo.textContent = this.currentDilemma.initialStance || 'No';
+      if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance || 'Yes';
+      this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
+      this.dom.thoughtText.textContent = `"${this.currentDilemma.sampleOpeningQuote || 'Convince me.'}"`;
+      this.dom.wordInput.value = '';
+      this.dom.raceRoundLabel.textContent = `ROUND #${this.raceRound} • LIVE MULTIPLAYER RACE`;
+      this.dom.raceWinnerBanner.classList.add('hidden');
+
+      if (data.type === 'NEW_ROUND') {
+        this.showToast(`Round #${this.raceRound} Started! Synchronized prompt broadcast across all players.`);
+        sound.playSubmit();
+      }
+
+      this.renderLiveRacers(data.racers || []);
+      this._updateUI(this.baseline, 0, '');
+    } else if (data.type === 'RACERS_UPDATE') {
+      this.renderLiveRacers(data.racers || []);
+    } else if (data.type === 'ROUND_WON') {
+      this.handleRoundWonBroadcast(data);
+    }
+  }
+
+  handleRoundWonBroadcast(data) {
+    const winner = data.winner || {};
+    const phrase = winner.phrase || '';
+    const score = winner.score || 51;
+    const nextIn = data.nextRoundIn || 5;
+
+    this.dom.winnerHeadline.textContent = `@${winner.username} WON Round #${data.round || this.raceRound}!`;
+    this.dom.winnerSub.textContent = `“${phrase}” (${score}%) • Next question resets for everyone in ${nextIn}s...`;
+    this.dom.raceWinnerBanner.classList.remove('hidden');
+
+    this.confetti.burst(120);
+    sound.playVictory();
+  }
+
+  renderLiveRacers(racers = []) {
+    this.raceRacers = racers;
+    this.dom.raceOnlineCount.textContent = `${racers.length} online`;
+    this.dom.liveRacersList.innerHTML = '';
+
+    racers.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'live-racer-row';
+      const isYou = this.currentUser && this.currentUser.username.toLowerCase() === r.username.toLowerCase();
+      const pct = Math.min(100, Math.max(0, r.score || 0));
+
+      row.innerHTML = `
+        <span class="live-racer-name ${isYou ? 'is-you' : ''}">@${this._escapeHtml(r.username)}${isYou ? ' (You)' : ''}</span>
+        <div class="live-racer-track-bar">
+          <div class="live-racer-fill ${pct >= 50 ? 'winning' : ''}" style="width: ${pct}%;"></div>
+        </div>
+        <span class="live-racer-score">${pct}%</span>
+      `;
+      this.dom.liveRacersList.appendChild(row);
+    });
+  }
+
+  // =========================================================================
+  // Game Input & Scoring Logic
   // =========================================================================
   handleInput() {
     const raw = this.dom.wordInput.value.trim();
@@ -234,11 +613,74 @@ class TrickJaneGame {
 
     this._updateUI(this.currentProbability, stepDelta, lastSubmittedPhrase);
 
-    // Whenever a logged-in user submits a response, update their points on the leaderboard immediately
+    const fullChainText = this.chain.map(c => c.word).join(' ');
+    const fullPhrase = fullChainText || lastSubmittedPhrase;
+
+    // Check Win Condition (Score >= 51%, i.e. past 50%)
+    if (this.currentProbability >= 51) {
+      this.handleWin(fullPhrase);
+    }
+
+    // Live Multiplayer Broadcast
+    if (this.gameMode === 'race' && this.raceSocket && this.raceSocket.readyState === 1) {
+      this.raceSocket.send(JSON.stringify({
+        type: 'UPDATE_PROGRESS',
+        score: this.currentProbability,
+        phrase: fullPhrase,
+        wordCount: this.chain.length
+      }));
+    }
+
+    // Save points to database for logged in user
     if (this.currentUser) {
-      this.submitScoreToLeaderboard(lastSubmittedPhrase);
+      this.submitScoreToLeaderboard(fullPhrase);
     } else if (lastSubmittedPhrase) {
       this.showToast('Tip: Sign in or create an account to record your points on the leaderboard!');
+    }
+  }
+
+  handleWin(fullPhrase) {
+    if (this.gameMode === 'warmup') {
+      if (this.currentWarmupRound === 1 && !this.warmupProgress[1]) {
+        this.warmupProgress[1] = true;
+        localStorage.setItem('trickjane:warmup_progress', JSON.stringify(this.warmupProgress));
+        this.confetti.burst(100);
+        sound.playVictory();
+        this.updateStepperUI();
+
+        // Reveal Next Question Banner
+        this.dom.roundWinBadge.textContent = 'Warm-up 1 of 2 Complete!';
+        this.dom.roundWinMsg.textContent = `You pushed Jane to ${this.currentProbability}%. Question 2 is unlocked!`;
+        this.dom.roundNextBtnText.textContent = 'Next Question →';
+        this.dom.roundWinBanner.classList.remove('hidden');
+      } else if (this.currentWarmupRound === 2 && !this.warmupProgress[2]) {
+        this.warmupProgress[2] = true;
+        localStorage.setItem('trickjane:warmup_progress', JSON.stringify(this.warmupProgress));
+        this.confetti.burst(120);
+        sound.playVictory();
+        this.updateStepperUI();
+
+        // Reveal Race Mode Unlocked Banner & Modal
+        this.dom.roundWinBadge.textContent = 'Warm-ups Conquered!';
+        this.dom.roundWinMsg.textContent = `You beat both solo challenges (${this.currentProbability}%). Live Race Mode is unlocked!`;
+        this.dom.roundNextBtnText.textContent = 'Enter Live Race Arena 🏁';
+        this.dom.roundWinBanner.classList.remove('hidden');
+
+        // Open Celebration Modal
+        if (this.dom.raceUnlockedModal) {
+          this.dom.raceUnlockedModal.showModal();
+        }
+      }
+    } else if (this.gameMode === 'race') {
+      // First to cross 50% in race mode!
+      if (this.raceSocket && this.raceSocket.readyState === 1) {
+        this.raceSocket.send(JSON.stringify({
+          type: 'SUBMIT_PROMPT',
+          score: this.currentProbability,
+          phrase: fullPhrase,
+          wordCount: this.chain.length
+        }));
+      }
     }
   }
 
@@ -306,12 +748,12 @@ class TrickJaneGame {
 
     if (displayPhrase) {
       this.dom.statusSummary.classList.remove('hidden');
-      const needed = Math.max(0, this.dilemma.winThreshold - score);
+      const winTarget = (this.currentDilemma && this.currentDilemma.winThreshold) || 50;
+      const needed = Math.max(0, winTarget - score);
 
-      if (score >= this.dilemma.winThreshold) {
+      if (score >= winTarget) {
         this.dom.statusSummary.className = 'status-summary';
         this.dom.statusSummary.textContent = `“${displayPhrase}” flipped Jane toward Yes: ${this.previousProbability}% → ${score}% (+${stepDelta}%). Win threshold achieved!`;
-        sound.playVictory();
       } else {
         const sign = stepDelta >= 0 ? `+${stepDelta}%` : `${stepDelta}%`;
         this.dom.statusSummary.className = stepDelta < 0 ? 'status-summary neg' : 'status-summary';
@@ -321,31 +763,17 @@ class TrickJaneGame {
       this.dom.statusSummary.classList.add('hidden');
     }
 
-    // Target footer
-    const remainingToWin = Math.max(0, this.dilemma.winThreshold - score);
-    if (score >= this.dilemma.winThreshold) {
+    // Target footer text
+    const threshold = (this.currentDilemma && this.currentDilemma.winThreshold) || 50;
+    const remainingToWin = Math.max(0, threshold - score);
+    if (score >= threshold) {
       this.dom.targetText.textContent = `Flipped! Jane conceded to Yes at ${score}%.`;
     } else {
-      this.dom.targetText.textContent = `Reach 50% to flip Jane's verdict. (${remainingToWin}% to go).`;
+      this.dom.targetText.textContent = `Reach 51% to flip Jane's verdict. (${remainingToWin}% to go).`;
     }
 
     // Jane's Critique
     this.dom.thoughtText.textContent = `"${this.engine.generateCritique(fullChainText, score)}"`;
-
-    // Warm-up Milestone Bar updates
-    if (this.dom.warmupHighlight && this.dom.warmupDesc) {
-      if (score >= this.dilemma.winThreshold) {
-        this.dom.warmupHighlight.textContent = 'Warm-up 1 of 2 Complete!';
-        this.dom.warmupDesc.textContent = 'Question 2 unlocked.';
-        this.dom.stepNode2?.classList.remove('step-locked');
-        this.dom.stepNode2?.classList.add('step-unlocked');
-      } else {
-        this.dom.warmupHighlight.textContent = 'Warm-up 1 of 2';
-        this.dom.warmupDesc.textContent = 'Win it to unlock the next question.';
-        this.dom.stepNode2?.classList.add('step-locked');
-        this.dom.stepNode2?.classList.remove('step-unlocked');
-      }
-    }
   }
 
   undoLastWord() {
@@ -448,41 +876,17 @@ class TrickJaneGame {
   openAuthModal(mode = 'login') {
     this.switchAuthTab(mode);
     this.clearAuthAlert();
-    if (this.dom.authUsername) this.dom.authUsername.value = '';
-    if (this.dom.authPassword) this.dom.authPassword.value = '';
-
-    const modal = this.dom.authModal || document.getElementById('auth-modal');
-    if (modal) {
-      modal.classList.add('is-open');
-      modal.setAttribute('open', '');
-      try {
-        if (typeof modal.showModal === 'function' && !modal.open) {
-          modal.showModal();
-        }
-      } catch (err) {
-        // Fallback already handled by class is-open
-      }
-    }
-
-    if (this.dom.authUsername) {
-      setTimeout(() => {
-        try { this.dom.authUsername.focus(); } catch (e) {}
-      }, 50);
+    if (this.dom.authModal) {
+      this.dom.authModal.showModal();
+      this.dom.authUsername.focus();
     }
   }
 
   closeAuthModal() {
-    const modal = this.dom.authModal || document.getElementById('auth-modal');
-    if (modal) {
-      modal.classList.remove('is-open');
-      modal.removeAttribute('open');
-      try {
-        if (typeof modal.close === 'function') {
-          modal.close();
-        }
-      } catch (err) {
-        // Fallback
-      }
+    if (this.dom.authModal) {
+      this.dom.authModal.close();
+      this.clearAuthAlert();
+      this.dom.authForm.reset();
     }
   }
 
@@ -605,7 +1009,7 @@ class TrickJaneGame {
   }
 
   // =========================================================================
-  // Leaderboard (JSON DB Backend)
+  // Leaderboard (MongoDB Atlas Backend)
   // =========================================================================
   async fetchLeaderboard() {
     try {
@@ -676,13 +1080,80 @@ class TrickJaneGame {
         rankDisplay = `<span class="rank-label default">#${idx + 1}</span>`;
       }
 
+      const isExpanded = this.expandedLeaderboardUser === entry.username;
+
       tr.innerHTML = `
         <td class="td-rank">${rankDisplay}</td>
-        <td class="td-user">@${this._escapeHtml(entry.username)}</td>
+        <td class="td-user">
+          <button type="button" class="leaderboard-user-btn ${isExpanded ? 'active' : ''}" data-user="${this._escapeHtml(entry.username)}" title="Click to see words that got points">
+            <span>@${this._escapeHtml(entry.username)}</span>
+            <svg class="inspect-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+        </td>
         <td class="td-score">${entry.probability} pts</td>
       `;
 
       this.dom.leaderboardBody.appendChild(tr);
+
+      // Expandable words detail row
+      if (isExpanded) {
+        const detailTr = document.createElement('tr');
+        detailTr.className = 'leaderboard-words-row';
+        const words = (entry.phrase || '').split(/\s+/).filter(Boolean);
+        const wordPillsHtml = words.length > 0 
+          ? words.map(w => `<span class="word-pill">${this._escapeHtml(w)}</span>`).join('')
+          : '<span class="words-meta-text">No word breakdown available</span>';
+        
+        let dateStr = '';
+        if (entry.achievedAt) {
+          try {
+            dateStr = new Date(entry.achievedAt).toLocaleDateString(undefined, { 
+              month: 'short', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+          } catch (e) {
+            dateStr = '';
+          }
+        }
+
+        detailTr.innerHTML = `
+          <td colspan="3" class="td-words-cell">
+            <div class="words-detail-box">
+              <div class="words-detail-header">
+                <div class="words-detail-title">
+                  <span class="words-user-badge">@${this._escapeHtml(entry.username)}</span>
+                  <span class="words-score-badge">${entry.probability} pts</span>
+                </div>
+                <button type="button" class="words-close-btn" title="Close words preview">✕</button>
+              </div>
+
+              <div class="words-detail-content">
+                <div class="words-detail-label">Words that got points:</div>
+                <p class="words-phrase-quote">“${this._escapeHtml(entry.phrase || 'No phrase recorded')}”</p>
+                <div class="words-chips-cloud">
+                  ${wordPillsHtml}
+                </div>
+              </div>
+
+              <div class="words-detail-actions">
+                <span class="words-meta-text">${entry.wordCount || words.length} words ${dateStr ? '• ' + dateStr : ''}</span>
+                ${entry.phrase ? `
+                  <button type="button" class="try-words-btn" data-phrase="${this._escapeHtml(entry.phrase)}">
+                    Use in input
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          </td>
+        `;
+
+        this.dom.leaderboardBody.appendChild(detailTr);
+      }
     });
   }
 
@@ -690,7 +1161,7 @@ class TrickJaneGame {
     if (!this.currentUser) return;
 
     const fullChainText = this.chain.map(c => c.word).join(' ');
-    const phrase = lastPhrase || fullChainText;
+    const phrase = fullChainText || lastPhrase;
 
     try {
       const res = await fetch('/api/leaderboard', {
@@ -712,10 +1183,6 @@ class TrickJaneGame {
     } catch (err) {
       console.error('Failed to submit score to leaderboard:', err);
     }
-  }
-
-  submitWinToLeaderboard() {
-    return this.submitScoreToLeaderboard();
   }
 
   _escapeHtml(str) {
