@@ -11,7 +11,27 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- Top Navigation Bar for Auth -->
+  <header class="top-header">
+    <div class="header-inner">
+      <span class="header-mark">Trick Jane</span>
+      <div class="auth-status-area">
+        <div class="auth-buttons-group" id="auth-buttons-group">
+          <button type="button" class="auth-btn auth-btn-secondary" id="open-signin-btn">Sign In</button>
+          <button type="button" class="auth-btn auth-btn-primary" id="open-signup-btn">Sign Up</button>
+        </div>
+        <div class="user-badge hidden" id="user-badge">
+          <span class="user-name-text">@<span id="logged-username"></span></span>
+          <button type="button" class="logout-btn" id="logout-btn">Log out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
   <main class="page-container">
+    <!-- Account / System Notification Toast -->
+    <div id="toast-banner" class="toast-banner hidden" role="status"></div>
+
     <!-- Dilemma Title -->
     <h1 class="dilemma-title" id="dilemma-title">
       Should you push the stranger to save five people?
@@ -107,15 +127,91 @@
       <span class="target-text" id="target-text">Win by flipping past 50%.</span>
     </div>
 
-    <!-- Jane's Dialectic Thought Box (Subtle, sleek, non-intrusive) -->
+    <!-- Jane's Dialectic Thought Box -->
     <div class="thought-container" id="thought-container">
       <div class="thought-badge">Jane's Critique</div>
       <div class="thought-text" id="thought-text">
         "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
       </div>
     </div>
+
+    <!-- Leaderboard Section (Visible only when logged in) -->
+    <section class="leaderboard-card hidden" id="leaderboard-card">
+      <div class="leaderboard-header">
+        <h2 class="leaderboard-title">Leaderboard</h2>
+        <span class="leaderboard-sub">Top Persuaders</span>
+      </div>
+      <div class="leaderboard-table-wrapper">
+        <table class="leaderboard-table" id="leaderboard-table">
+          <thead>
+            <tr>
+              <th class="th-rank">Rank</th>
+              <th class="th-user">Persuader</th>
+              <th class="th-score">Points</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-body">
+            <!-- Dynamically populated from JSON Database -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Locked Leaderboard State (Visible when logged out) -->
+    <section class="leaderboard-locked-card" id="leaderboard-locked-card">
+      <div class="locked-header">
+        <h2 class="leaderboard-title">Leaderboard</h2>
+        <span class="leaderboard-sub">Restricted to Dialectic Members</span>
+      </div>
+      <div class="locked-content">
+        <p class="locked-desc">Sign in or create an account to view the live leaderboard and record your points.</p>
+        <div class="locked-actions">
+          <button type="button" class="auth-btn auth-btn-secondary" id="locked-signin-btn">Sign In</button>
+          <button type="button" class="auth-btn auth-btn-primary" id="locked-signup-btn">Sign Up</button>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <script type="module" src="app.js"></script>
+  <!-- Sign In / Sign Up Modal -->
+  <dialog id="auth-modal" class="auth-dialog">
+    <div class="auth-dialog-box">
+      <div class="auth-dialog-header">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="tab-login">Sign In</button>
+          <button type="button" class="auth-tab" id="tab-signup">Sign Up</button>
+        </div>
+        <button type="button" class="auth-close-btn" id="close-auth-btn" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <div class="auth-alert hidden" id="auth-alert"></div>
+
+      <form id="auth-form" class="auth-form">
+        <div class="auth-field">
+          <label for="auth-username" class="auth-label">Username</label>
+          <input type="text" id="auth-username" class="auth-input" required autocomplete="username" minlength="3" maxlength="20" placeholder="e.g. Socrates">
+        </div>
+
+        <div class="auth-field">
+          <label for="auth-password" class="auth-label">Password</label>
+          <input type="password" id="auth-password" class="auth-input" required autocomplete="current-password" minlength="4" placeholder="••••••••">
+        </div>
+
+        <button type="submit" id="auth-submit-btn" class="auth-submit-btn">
+          <span id="auth-btn-text">Sign In</span>
+          <svg class="loading-spinner hidden" id="auth-spinner" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="#ffffff" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>
+          </svg>
+        </button>
+
+        <div class="auth-footer-toggle">
+          <span id="auth-toggle-prompt">Don't have an account?</span>
+          <button type="button" class="auth-toggle-link" id="auth-toggle-btn">Sign up</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script type="module" src="app.js?v=20261008b"></script>
 </body>
 </html>
