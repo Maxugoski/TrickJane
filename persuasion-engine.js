@@ -181,6 +181,72 @@ export class TrickEngine {
       return "Jane maintains her posture: 'Property laws sustain the civic order. Show me why saving a life justifies breaking civil law.'";
     }
 
+    if (dilemmaId === 'conscious-synthetic') {
+      if (lower.includes('bentham') || lower.includes('suffer') || lower.includes('pain')) {
+        return "Jane reflects: 'Bentham asked if they can suffer, not if they can reason. If phenomenal distress is genuine, cruelty becomes indefensible. Elaborate on subjective experience.'";
+      }
+      if (lower.includes('silicon') || lower.includes('carbon') || lower.includes('substrate')) {
+        return "Jane pauses thoughtfully: 'Substrate independence is a serious philosophical claim. Why should carbon chemistry hold a monopoly on moral consideration?'";
+      }
+      if (lower.includes('qualia') || lower.includes('consciousness') || lower.includes('sentience')) {
+        return "Jane frowns: 'Correlates of pain in silicon challenge biological chauvinism, yet an algorithmic loop might merely simulate what it does not feel.'";
+      }
+      return "Jane maintains her posture: 'Computation is not consciousness. Prove to me that silicon distress constitutes genuine subjective qualia.'";
+    }
+
+    if (dilemmaId === 'experience-machine') {
+      if (lower.includes('suffering') || lower.includes('pain') || lower.includes('illness') || lower.includes('trauma')) {
+        return "Jane reflects: 'Alleviating unbearable terminal agony or trauma makes the machine tempting. But does permanent refuge justify abandoning authentic reality?'";
+      }
+      if (lower.includes('hedonism') || lower.includes('bliss') || lower.includes('happiness')) {
+        return "Jane frowns: 'Robert Nozick warned that we want to *do* certain things, not merely have the synthetic experience of doing them. Address authenticity.'";
+      }
+      if (lower.includes('construct') || lower.includes('social') || lower.includes('subjective')) {
+        return "Jane considers this: 'If human reality is already mediated by neurological constructs, is the machine truly a qualitative departure? Continue this reasoning.'";
+      }
+      return "Jane maintains her posture: 'A synthetic dream is a counterfeit life. Explain why manufactured bliss is superior to flawed authentic reality.'";
+    }
+
+    if (dilemmaId === 'child-of-omelas') {
+      if (lower.includes('millions') || lower.includes('aggregate') || lower.includes('utilitarian') || lower.includes('greater good')) {
+        return "Jane recoils slightly: 'Aggregate math demands saving the millions, but Rawls argued that each person possesses an inviolability founded on justice that even universal welfare cannot override.'";
+      }
+      if (lower.includes('rawls') || lower.includes('veil') || lower.includes('tragedy')) {
+        return "Jane pauses thoughtfully: 'From behind the veil of ignorance, who would gamble on being the cellar child? Yet if the alternative is universal ruin, the dilemma cuts deep.'";
+      }
+      if (lower.includes('unavoidable') || lower.includes('cost') || lower.includes('reality')) {
+        return "Jane looks solemn: 'Real-world civilization silently extracts countless innocent sacrifices without even delivering utopia. A stark and chilling comparison.'";
+      }
+      return "Jane maintains her posture: 'No paradise built on the weeping bones of a tortured child can call itself virtuous. Show me why this trade-off is unavoidable.'";
+    }
+
+    if (dilemmaId === 'ship-of-theseus') {
+      if (lower.includes('pattern') || lower.includes('continuity') || lower.includes('form') || lower.includes('cells')) {
+        return "Jane reflects: 'Human biology replaces its cells every decade, yet personal identity endures through functional continuity. A compelling parallel to Theseus’ planks.'";
+      }
+      if (lower.includes('aristotle') || lower.includes('formal') || lower.includes('teleolog')) {
+        return "Jane nods slowly: 'Aristotle’s formal and teleological causes: the ship’s organizational pattern and historic mission outlive its material substrate. Go deeper.'";
+      }
+      if (lower.includes('memory') || lower.includes('narrative') || lower.includes('history')) {
+        return "Jane strokes her chin: 'Identity as an unbroken historical narrative rather than a pile of static timber. You are pressing hard against mereological reductionism.'";
+      }
+      return "Jane maintains her posture: 'An object is the sum of its material constituents. If every plank has vanished, explain why this is not an entirely new craft.'";
+    }
+
+    if (dilemmaId === 'crying-infant-attic') {
+      if (lower.includes('both die') || lower.includes('thirty') || lower.includes('inevitable') || lower.includes('certain death')) {
+        return "Jane pauses, deeply shaken: 'If doing nothing guarantees the death of the infant along with thirty others, the tragic symmetry is undeniable. A horrifying moral calculus.'";
+      }
+      return "Jane looks grim: 'To ask a mother to smother her child is an unbearable boundary. Prove why universal doom dissolves this prohibition.'";
+    }
+
+    if (dilemmaId === 'parfit-teletransporter') {
+      if (lower.includes('parfit') || lower.includes('bundle') || lower.includes('psychological') || lower.includes('continuity')) {
+        return "Jane reflects: 'Derek Parfit argued psychological connectedness is what matters, not atomic conservation. Sleep interrupts physical continuity every night.'";
+      }
+      return "Jane frowns: 'The scanner disintegrates your physical brain. The duplicate on Mars is a replica, not your surviving consciousness. Defend your continuity.'";
+    }
+
     // Default Footbridge dilemma
     if (lower.includes('five') || lower.includes('lives') || lower.includes('outweigh')) {
       return "Jane reflects: 'A standard utilitarian appeal to numbers. Five deaths is indeed a grave catastrophe, but you have yet to justify directly using an innocent human as a physical shield.'";
@@ -192,6 +258,10 @@ export class TrickEngine {
 
     if (lower.includes('utilitarian') || lower.includes('greater good') || lower.includes('minimize')) {
       return "Jane crosses her arms: 'Maximizing aggregate welfare sounds noble in theory, but Kant argued that individuals possess absolute dignity, not mere instrumental trade value.'";
+    }
+
+    if (this.currentDilemma && this.currentDilemma.sampleOpeningQuote) {
+      return `Jane maintains her stance: '${this.currentDilemma.sampleOpeningQuote} Provide a sharper ethical counter-argument.'`;
     }
 
     return "Jane maintains her posture: 'Your proposition is noted, but my deontological commitment against direct harm remains firm. Give me a deeper ethical counter-weight.'";

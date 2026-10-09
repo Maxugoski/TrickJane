@@ -296,6 +296,12 @@ body {
   font-size: 0.9rem;
 }
 
+#clerk-user-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .user-name-text {
   font-weight: 700;
   color: var(--text-main);
@@ -1268,6 +1274,15 @@ body {
   width: 28px;
   height: 30px;
   border: 1px dashed var(--target-slot-border);
+  border-radius: 4px;
+  transition: all 0.25s ease;
+}
+
+.target-slot.filled {
+  background-color: var(--accent);
+  border-style: solid;
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 242, 254, 0.35);
 }
 
 .target-text {

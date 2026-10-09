@@ -86,6 +86,8 @@ class TrickJaneGame {
       negativeRow: document.getElementById('negative-row'),
       negativeList: document.getElementById('negative-list'),
       statusSummary: document.getElementById('status-summary'),
+      targetWordBadge: document.getElementById('target-word-badge'),
+      targetDots: document.getElementById('target-dots'),
       targetText: document.getElementById('target-text'),
       thoughtText: document.getElementById('thought-text'),
 
@@ -161,6 +163,7 @@ class TrickJaneGame {
 
   init() {
     this.initTheme();
+    this.initClerk();
 
     // Start on Warm-up 1 or saved question
     const initialRound = (this.warmupProgress[1] && !this.warmupProgress[2]) ? 2 : 1;
@@ -349,6 +352,7 @@ class TrickJaneGame {
     this.dom.dilemmaTitle.textContent = this.currentDilemma.title;
     if (this.dom.verdictNo) this.dom.verdictNo.textContent = this.currentDilemma.initialStance;
     if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance;
+    if (this.dom.targetWordBadge) this.dom.targetWordBadge.textContent = (this.currentDilemma.goalStance || 'Yes').toLowerCase();
     this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
     this.dom.thoughtText.textContent = `"${this.currentDilemma.openingQuote}"`;
     this.dom.wordInput.value = '';
@@ -504,6 +508,7 @@ class TrickJaneGame {
       this.dom.dilemmaTitle.textContent = this.currentDilemma.title;
       if (this.dom.verdictNo) this.dom.verdictNo.textContent = this.currentDilemma.initialStance || 'No';
       if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance || 'Yes';
+      if (this.dom.targetWordBadge) this.dom.targetWordBadge.textContent = (this.currentDilemma.goalStance || 'Yes').toLowerCase();
       this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
       this.dom.thoughtText.textContent = `"${this.currentDilemma.sampleOpeningQuote || 'Convince me.'}"`;
       this.dom.wordInput.value = '';
@@ -763,9 +768,22 @@ class TrickJaneGame {
       this.dom.statusSummary.classList.add('hidden');
     }
 
-    // Target footer text
+    // Target slots & footer text
     const threshold = (this.currentDilemma && this.currentDilemma.winThreshold) || 50;
     const remainingToWin = Math.max(0, threshold - score);
+    if (this.dom.targetDots) {
+      const slotCount = 3;
+      const filledCount = Math.min(slotCount, Math.floor((score / threshold) * slotCount));
+      this.dom.targetDots.innerHTML = '';
+      for (let i = 0; i < slotCount; i++) {
+        const slot = document.createElement('span');
+        slot.className = i < filledCount ? 'target-slot filled' : 'target-slot';
+        this.dom.targetDots.appendChild(slot);
+      }
+    }
+    if (this.dom.targetWordBadge) {
+      this.dom.targetWordBadge.textContent = (this.currentDilemma?.goalStance || 'Yes').toLowerCase();
+    }
     if (score >= threshold) {
       this.dom.targetText.textContent = `Flipped! Jane conceded to Yes at ${score}%.`;
     } else {
@@ -851,13 +869,77 @@ class TrickJaneGame {
   }
 
   // =========================================================================
-  // Authentication (JSON DB Backend)
+  // Authentication (Clerk & MongoDB Atlas Backend)
   // =========================================================================
+  initClerk() {
+    let attempts = 0;
+    const pollClerk = () => {
+      attempts++;
+      if (window.Clerk) {
+        window.Clerk.load().then(() => {
+          this.handleClerkState();
+          window.Clerk.addListener(() => {
+            this.handleClerkState();
+          });
+        }).catch(err => {
+          console.warn('Clerk SDK initialization notice:', err);
+        });
+      } else if (attempts < 50) {
+        setTimeout(pollClerk, 150);
+      }
+    };
+    pollClerk();
+  }
+
+  handleClerkState() {
+    if (!window.Clerk) return;
+
+    if (window.Clerk.user) {
+      const u = window.Clerk.user;
+      const username = u.username || u.firstName || (u.primaryEmailAddress ? u.primaryEmailAddress.emailAddress.split('@')[0] : 'Trickster');
+      this.currentUser = {
+        id: u.id,
+        username: username,
+        isClerk: true
+      };
+      localStorage.setItem('trickjane:auth_user', JSON.stringify(this.currentUser));
+      this._updateAuthUI();
+
+      // Synchronize Clerk user to MongoDB Atlas
+      fetch('/api/auth/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, clerkId: u.id })
+      }).catch(err => {
+        console.warn('MongoDB user sync notice:', err);
+      });
+
+      // Mount Clerk User Button if container is in DOM
+      const userBtnEl = document.getElementById('clerk-user-button');
+      if (userBtnEl && window.Clerk.mountUserButton) {
+        userBtnEl.innerHTML = '';
+        window.Clerk.mountUserButton(userBtnEl);
+      }
+    } else {
+      if (this.currentUser && this.currentUser.isClerk) {
+        this.currentUser = null;
+        localStorage.removeItem('trickjane:auth_user');
+        this._updateAuthUI();
+      }
+    }
+  }
+
   _updateAuthUI() {
     if (this.currentUser) {
       if (this.dom.authButtonsGroup) this.dom.authButtonsGroup.classList.add('hidden');
       if (this.dom.userBadge) this.dom.userBadge.classList.remove('hidden');
       if (this.dom.loggedUsername) this.dom.loggedUsername.textContent = this.currentUser.username;
+
+      const userBtnEl = document.getElementById('clerk-user-button');
+      if (userBtnEl && window.Clerk && window.Clerk.user && window.Clerk.mountUserButton) {
+        userBtnEl.innerHTML = '';
+        window.Clerk.mountUserButton(userBtnEl);
+      }
 
       // Show leaderboard to logged-in users only
       if (this.dom.leaderboardCard) this.dom.leaderboardCard.classList.remove('hidden');
@@ -1002,6 +1084,9 @@ class TrickJaneGame {
   }
 
   logout() {
+    if (window.Clerk && window.Clerk.signOut && this.currentUser?.isClerk) {
+      window.Clerk.signOut().catch(() => {});
+    }
     this.currentUser = null;
     localStorage.removeItem('trickjane:auth_user');
     this._updateAuthUI();

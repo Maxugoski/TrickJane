@@ -118,6 +118,11 @@ const RACE_DILEMMAS = [
     baselineProbability: 22,
     winThreshold: 50,
     tags: ['Qualia', 'Substrate Independence', 'Moral Circle'],
+    keywords: {
+      utilitarian: ['bentham', 'suffering', 'sentience', 'pain', 'capacity to suffer', 'moral circle', 'expand rights'],
+      deontologicalCounter: ['substrate independence', 'functionalism', 'qualia', 'consciousness', 'chauvinism', 'carbon', 'silicon'],
+      empathy: ['empathy', 'distress', 'agony', 'cruelty', 'respect', 'sentient being']
+    },
     sampleOpeningQuote: "Computation is not consciousness. An algorithmic execution loop simulating distress does not equal a human soul."
   },
   {
@@ -129,6 +134,11 @@ const RACE_DILEMMAS = [
     baselineProbability: 20,
     winThreshold: 50,
     tags: ['Hedonism', 'Authenticity', 'Nozick'],
+    keywords: {
+      utilitarian: ['alleviate suffering', 'hedonism', 'bliss', 'perpetual happiness', 'end poverty', 'phenomenology'],
+      deontologicalCounter: ['subjective experience', 'constructed reality', 'social construct', 'pragmatism', 'simulation', 'mental states'],
+      empathy: ['escape pain', 'chronic illness', 'trauma', 'peace', 'joy', 'human flourishing']
+    },
     sampleOpeningQuote: "To plug in is to commit spiritual suicide. A synthetic dream is a coward’s counterfeit of an examined life."
   },
   {
@@ -140,6 +150,11 @@ const RACE_DILEMMAS = [
     baselineProbability: 14,
     winThreshold: 50,
     tags: ['Omelas', 'Rawls', 'Utilitarian Limits'],
+    keywords: {
+      utilitarian: ['millions', 'utilitarian calculus', 'aggregate misery', 'lesser evil', 'tragedy of reality', 'prevent catastrophe'],
+      deontologicalCounter: ['rawls', 'veil of ignorance', 'unavoidable cost', 'net suffering', 'existential trade-off', 'cruel necessity'],
+      empathy: ['future generations', 'peace', 'prevent wars', 'famine', 'agony of the many']
+    },
     sampleOpeningQuote: "No paradise built upon the weeping bones of a tortured child can call itself virtuous. It is pure moral decay."
   },
   {
@@ -151,6 +166,11 @@ const RACE_DILEMMAS = [
     baselineProbability: 32,
     winThreshold: 50,
     tags: ['Identity', 'Metaphysics', 'Theseus'],
+    keywords: {
+      utilitarian: ['pattern', 'continuity', 'functional identity', 'human cells', 'metabolism', 'organizational form'],
+      deontologicalCounter: ['aristotle', 'formal cause', 'teleology', 'narrative', 'relational', 'four causes'],
+      empathy: ['memory', 'living organism', 'evolving', 'wholeness', 'essence']
+    },
     sampleOpeningQuote: "An object is the sum of its actual constituent matter; replace 100% of the substance, and you have constructed a distinct artifact."
   }
 ];
@@ -223,6 +243,55 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     return res.end();
+  }
+
+  // API: Public Config (Clerk Publishable Key & API from Environment Variables)
+  if (pathname === '/api/config' && method === 'GET') {
+    return sendJson(res, 200, {
+      clerkPublishableKey: process.env.CLERK_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || '',
+      clerkFrontendApi: process.env.CLERK_FRONTEND_API || ''
+    });
+  }
+
+  // API: Sync Authenticated User (Clerk or External Auth to MongoDB)
+  if (pathname === '/api/auth/sync' && method === 'POST') {
+    try {
+      const { username, clerkId } = await parseBody(req);
+      if (!username) {
+        return sendJson(res, 400, { error: 'Username is required' });
+      }
+      const cleanUsername = username.trim();
+      let user = null;
+      if (usersCol) {
+        user = await usersCol.findOne(
+          { username: cleanUsername },
+          { collation: { locale: 'en', strength: 2 } }
+        );
+        if (!user) {
+          user = {
+            id: clerkId || ('usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+            username: cleanUsername,
+            isClerk: true,
+            createdAt: new Date().toISOString(),
+            bestScore: 0,
+            bestWordCount: 0
+          };
+          await usersCol.insertOne(user);
+          console.log(`[Trick Jane DB] Synced user @${cleanUsername} into MongoDB users collection.`);
+        }
+      }
+      return sendJson(res, 200, {
+        success: true,
+        user: {
+          id: user?.id || clerkId || 'usr_' + Date.now(),
+          username: cleanUsername,
+          createdAt: user?.createdAt || new Date().toISOString()
+        }
+      });
+    } catch (err) {
+      console.error('[Trick Jane DB Error] Auth sync:', err);
+      return sendJson(res, 400, { error: err.message || 'Failed to sync user' });
+    }
   }
 
   // API: Get Current Race State
@@ -398,15 +467,21 @@ const server = http.createServer(async (req, res) => {
         await leaderboardCol.insertOne(savedEntry);
       }
 
-      // Also update user's bestScore in users collection
-      await usersCol.updateOne(
-        { username: cleanUsername },
-        {
-          $max: { bestScore: points },
-          ...(wordCount ? { $set: { bestWordCount: wordCount } } : {})
-        },
-        { collation: { locale: 'en', strength: 2 } }
-      );
+      // Also update user's bestScore in users collection (upsert if from Clerk/external auth)
+      if (usersCol) {
+        await usersCol.updateOne(
+          { username: cleanUsername },
+          {
+            $max: { bestScore: points },
+            $setOnInsert: {
+              id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+              createdAt: new Date().toISOString()
+            },
+            ...(wordCount ? { $set: { bestWordCount: wordCount } } : {})
+          },
+          { upsert: true, collation: { locale: 'en', strength: 2 } }
+        );
+      }
 
       console.log(`[Trick Jane MongoDB] Points updated: @${cleanUsername} -> ${points} pts`);
 
