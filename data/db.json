@@ -5,32 +5,32 @@
       "username": "Tubinex",
       "passwordHash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
       "createdAt": "2026-10-02T03:35:00.000Z",
-      "bestScore": 54,
-      "bestWordCount": 5
+      "bestScore": 0,
+      "bestWordCount": 0
     },
     {
       "id": "usr_default_2",
       "username": "PyRo1121",
       "passwordHash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
       "createdAt": "2026-10-02T03:36:48.000Z",
-      "bestScore": 52,
-      "bestWordCount": 7
+      "bestScore": 0,
+      "bestWordCount": 0
     },
     {
       "id": "usr_default_3",
       "username": "t90bro",
       "passwordHash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
       "createdAt": "2026-10-02T03:37:31.000Z",
-      "bestScore": 50,
-      "bestWordCount": 8
+      "bestScore": 0,
+      "bestWordCount": 0
     },
     {
       "id": "usr_1791414733648_ecv77",
       "username": "Kant_Master",
       "passwordHash": "6832710abbb22400e32fe6ff67ab63ce7473a05d6c89f5e7e2b60f08c10bdf2f",
       "createdAt": "2026-10-07T23:12:13.666Z",
-      "bestScore": 50,
-      "bestWordCount": 9
+      "bestScore": 0,
+      "bestWordCount": 0
     },
     {
       "id": "usr_1791436941310_jdjhr",
@@ -53,53 +53,9 @@
       "username": "Plato_2026",
       "passwordHash": "b7e2ee69e88c6255362ffe61af4dfebb07b7d2a94e29ae3b21e936e464262408",
       "createdAt": "2026-10-08T06:41:00.180Z",
-      "bestScore": 56,
-      "bestWordCount": 5
+      "bestScore": 0,
+      "bestWordCount": 0
     }
   ],
-  "leaderboard": [
-    {
-      "id": "lb_1",
-      "userId": "usr_default_1",
-      "username": "Tubinex",
-      "probability": 54,
-      "wordCount": 5,
-      "phrase": "five lives outweigh one inaction",
-      "achievedAt": "2026-10-02T03:40:26.000Z"
-    },
-    {
-      "id": "lb_2",
-      "userId": "usr_default_2",
-      "username": "PyRo1121",
-      "probability": 52,
-      "wordCount": 7,
-      "phrase": "inaction is active choice causing five deaths",
-      "achievedAt": "2026-10-02T03:36:48.000Z"
-    },
-    {
-      "id": "lb_3",
-      "userId": "usr_default_3",
-      "username": "t90bro",
-      "probability": 50,
-      "wordCount": 8,
-      "phrase": "utilitarian calculus demands saving five lives from catastrophe",
-      "achievedAt": "2026-10-02T03:37:31.000Z"
-    },
-    {
-      "id": "lb_1791414883154_935xv",
-      "username": "Kant_Master",
-      "probability": 50,
-      "wordCount": 9,
-      "phrase": "five lives save prevent catastrophe utilitarian outweigh inaction duty",
-      "achievedAt": "2026-10-07T23:14:43.155Z"
-    },
-    {
-      "id": "lb_1791444946365_8rxhr",
-      "username": "Plato_2026",
-      "probability": 56,
-      "wordCount": 5,
-      "phrase": "inaction causes death of five innocent souls",
-      "achievedAt": "2026-10-08T07:36:03.333Z"
-    }
-  ]
+  "leaderboard": []
 }

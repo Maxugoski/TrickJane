@@ -12,9 +12,31 @@ const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB_NAME || 'trickjane';
 
-if (!MONGODB_URI) {
-  console.error('[Trick Jane DB Error] MONGODB_URI is not defined in .env file!');
-  process.exit(1);
+const DB_FILE = path.join(__dirname, 'data', 'db.json');
+
+function readLocalDb() {
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      const initial = { users: [], leaderboard: [] };
+      fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+      fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf-8');
+      return initial;
+    }
+    const raw = fs.readFileSync(DB_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('[Local DB Error] Read:', err);
+    return { users: [], leaderboard: [] };
+  }
+}
+
+function writeLocalDb(data) {
+  try {
+    fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[Local DB Error] Write:', err);
+  }
 }
 
 // MongoDB Client & Collection references
@@ -22,19 +44,26 @@ let mongoClient = null;
 let db = null;
 let usersCol = null;
 let leaderboardCol = null;
+let isMongoConnected = false;
 
 async function initMongo() {
+  if (!MONGODB_URI) {
+    console.log('[Trick Jane DB] No MONGODB_URI found. Operating with local database ("data/db.json").');
+    return false;
+  }
   try {
     mongoClient = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 10000
+      serverSelectionTimeoutMS: 4000,
+      connectTimeoutMS: 4000
     });
     await mongoClient.connect();
     db = mongoClient.db(DB_NAME);
     usersCol = db.collection('users');
     leaderboardCol = db.collection('leaderboard');
+    isMongoConnected = true;
 
-    // Create unique index for usernames (case-insensitive)
+    // Create unique indexes
     try {
       await usersCol.createIndex(
         { username: 1 }, 
@@ -47,14 +76,15 @@ async function initMongo() {
       await leaderboardCol.createIndex(
         { probability: -1, wordCount: 1, achievedAt: -1 }
       );
-    } catch (idxErr) {
-      // Indexes may already exist
-    }
+    } catch (idxErr) {}
 
     console.log(`[Trick Jane DB] Connected successfully to MongoDB Atlas! Database: "${DB_NAME}"`);
+    return true;
   } catch (err) {
-    console.error('[Trick Jane DB Error] Failed to connect to MongoDB Atlas:', err);
-    throw err;
+    isMongoConnected = false;
+    console.warn('[Trick Jane DB Notice] MongoDB Atlas is currently unreachable (IP whitelist or TLS alert 80).');
+    console.log('[Trick Jane DB] Operating seamlessly on local persistent JSON database ("data/db.json").');
+    return false;
   }
 }
 
@@ -253,7 +283,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // API: Sync Authenticated User (Clerk or External Auth to MongoDB)
+  // API: Sync Authenticated User (Clerk or External Auth to MongoDB or local DB)
   if (pathname === '/api/auth/sync' && method === 'POST') {
     try {
       const { username, clerkId } = await parseBody(req);
@@ -262,24 +292,49 @@ const server = http.createServer(async (req, res) => {
       }
       const cleanUsername = username.trim();
       let user = null;
-      if (usersCol) {
-        user = await usersCol.findOne(
-          { username: cleanUsername },
-          { collation: { locale: 'en', strength: 2 } }
-        );
-        if (!user) {
-          user = {
-            id: clerkId || ('usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
-            username: cleanUsername,
-            isClerk: true,
-            createdAt: new Date().toISOString(),
-            bestScore: 0,
-            bestWordCount: 0
-          };
-          await usersCol.insertOne(user);
-          console.log(`[Trick Jane DB] Synced user @${cleanUsername} into MongoDB users collection.`);
+
+      if (isMongoConnected && usersCol) {
+        try {
+          user = await usersCol.findOne(
+            { username: cleanUsername },
+            { collation: { locale: 'en', strength: 2 } }
+          );
+          if (!user) {
+            user = {
+              id: clerkId || ('usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+              username: cleanUsername,
+              isClerk: true,
+              createdAt: new Date().toISOString(),
+              bestScore: 0,
+              bestWordCount: 0
+            };
+            await usersCol.insertOne(user);
+            console.log(`[Trick Jane DB] Synced user @${cleanUsername} into MongoDB users collection.`);
+          }
+        } catch (mErr) {
+          console.warn('[Trick Jane DB] Atlas sync notice:', mErr.message);
         }
       }
+
+      // Also ensure present in local db
+      const local = readLocalDb();
+      if (!Array.isArray(local.users)) local.users = [];
+      const existingLocal = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+      if (!existingLocal) {
+        user = user || {
+          id: clerkId || ('usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+          username: cleanUsername,
+          isClerk: true,
+          createdAt: new Date().toISOString(),
+          bestScore: 0,
+          bestWordCount: 0
+        };
+        local.users.push(user);
+        writeLocalDb(local);
+      } else {
+        user = user || existingLocal;
+      }
+
       return sendJson(res, 200, {
         success: true,
         user: {
@@ -324,13 +379,26 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'Password must be at least 4 characters' });
       }
 
-      // Check if user exists in MongoDB (case-insensitive)
-      const existing = await usersCol.findOne(
-        { username: cleanUsername },
-        { collation: { locale: 'en', strength: 2 } }
-      );
+      // Check MongoDB if connected
+      if (isMongoConnected && usersCol) {
+        try {
+          const existing = await usersCol.findOne(
+            { username: cleanUsername },
+            { collation: { locale: 'en', strength: 2 } }
+          );
+          if (existing) {
+            return sendJson(res, 409, { error: 'Username already taken. Please choose another or log in.' });
+          }
+        } catch (mErr) {
+          console.warn('[Trick Jane DB] Atlas lookup notice:', mErr.message);
+        }
+      }
 
-      if (existing) {
+      // Check local JSON database
+      const local = readLocalDb();
+      if (!Array.isArray(local.users)) local.users = [];
+      const existingLocal = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+      if (existingLocal) {
         return sendJson(res, 409, { error: 'Username already taken. Please choose another or log in.' });
       }
 
@@ -343,9 +411,16 @@ const server = http.createServer(async (req, res) => {
         bestWordCount: 0
       };
 
-      await usersCol.insertOne(newUser);
+      if (isMongoConnected && usersCol) {
+        try {
+          await usersCol.insertOne(newUser);
+        } catch (mErr) {}
+      }
 
-      console.log(`[Trick Jane MongoDB] Account created! User @${newUser.username} saved to MongoDB collection "users" (User ID: ${newUser.id})`);
+      local.users.push(newUser);
+      writeLocalDb(local);
+
+      console.log(`[Trick Jane DB] Account created! User @${newUser.username} registered.`);
 
       return sendJson(res, 201, {
         success: true,
@@ -357,7 +432,7 @@ const server = http.createServer(async (req, res) => {
         }
       });
     } catch (err) {
-      console.error('[Trick Jane MongoDB Error] Signup:', err);
+      console.error('[Trick Jane DB Error] Signup:', err);
       return sendJson(res, 400, { error: err.message || 'Signup failed' });
     }
   }
@@ -371,10 +446,25 @@ const server = http.createServer(async (req, res) => {
       }
 
       const cleanUsername = username.trim();
-      const user = await usersCol.findOne(
-        { username: cleanUsername },
-        { collation: { locale: 'en', strength: 2 } }
-      );
+      let user = null;
+
+      if (isMongoConnected && usersCol) {
+        try {
+          user = await usersCol.findOne(
+            { username: cleanUsername },
+            { collation: { locale: 'en', strength: 2 } }
+          );
+        } catch (mErr) {
+          console.warn('[Trick Jane DB] Atlas lookup notice:', mErr.message);
+        }
+      }
+
+      if (!user) {
+        const local = readLocalDb();
+        if (Array.isArray(local.users)) {
+          user = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+        }
+      }
 
       if (!user) {
         return sendJson(res, 401, { error: 'Invalid username or password' });
@@ -395,27 +485,82 @@ const server = http.createServer(async (req, res) => {
         }
       });
     } catch (err) {
-      console.error('[Trick Jane MongoDB Error] Login:', err);
+      console.error('[Trick Jane DB Error] Login:', err);
       return sendJson(res, 400, { error: err.message || 'Login failed' });
+    }
+  }
+
+  // API: Reset Leaderboard (Clears all leaderboard data & resets high scores)
+  if (pathname === '/api/leaderboard/reset' || (pathname === '/api/leaderboard' && method === 'DELETE')) {
+    try {
+      // 1. Reset local JSON database
+      const local = readLocalDb();
+      local.leaderboard = [];
+      if (Array.isArray(local.users)) {
+        local.users.forEach(u => {
+          u.bestScore = 0;
+          u.bestWordCount = 0;
+        });
+      }
+      writeLocalDb(local);
+
+      // 2. Reset MongoDB Atlas if connected
+      if (isMongoConnected && leaderboardCol) {
+        try {
+          await leaderboardCol.deleteMany({});
+          if (usersCol) {
+            await usersCol.updateMany({}, { $set: { bestScore: 0, bestWordCount: 0 } });
+          }
+        } catch (dbErr) {
+          console.warn('[Trick Jane DB Reset Notice] Atlas reset:', dbErr.message);
+        }
+      }
+
+      console.log('[Trick Jane DB] ★ Leaderboard successfully reset to empty!');
+      return sendJson(res, 200, {
+        success: true,
+        message: 'All leaderboard data has been completely reset.',
+        leaderboard: []
+      });
+    } catch (err) {
+      console.error('[Trick Jane DB Error] Reset leaderboard:', err);
+      return sendJson(res, 500, { error: 'Failed to reset leaderboard' });
     }
   }
 
   // API: Get Leaderboard
   if (pathname === '/api/leaderboard' && method === 'GET') {
     try {
-      const top10 = await leaderboardCol
-        .find({}, { projection: { _id: 0 } })
-        .sort({ probability: -1, wordCount: 1, achievedAt: -1 })
-        .limit(10)
-        .toArray();
+      if (isMongoConnected && leaderboardCol) {
+        try {
+          const top10 = await leaderboardCol
+            .find({}, { projection: { _id: 0 } })
+            .sort({ probability: -1, wordCount: 1, achievedAt: -1 })
+            .limit(10)
+            .toArray();
+
+          return sendJson(res, 200, {
+            success: true,
+            leaderboard: top10
+          });
+        } catch (mErr) {
+          console.warn('[Trick Jane DB] Atlas fetch notice:', mErr.message);
+        }
+      }
+
+      // Fallback to local db.json
+      const local = readLocalDb();
+      const top10 = (local.leaderboard || [])
+        .sort((a, b) => (b.probability || 0) - (a.probability || 0) || (a.wordCount || 0) - (b.wordCount || 0))
+        .slice(0, 10);
 
       return sendJson(res, 200, {
         success: true,
         leaderboard: top10
       });
     } catch (err) {
-      console.error('[Trick Jane MongoDB Error] Get Leaderboard:', err);
-      return sendJson(res, 500, { error: 'Failed to fetch leaderboard from database' });
+      console.error('[Trick Jane DB Error] Get Leaderboard:', err);
+      return sendJson(res, 200, { success: true, leaderboard: [] });
     }
   }
 
@@ -430,31 +575,90 @@ const server = http.createServer(async (req, res) => {
       const cleanUsername = username.trim();
       const points = Math.round(probability);
 
-      const existingEntry = await leaderboardCol.findOne(
-        { username: cleanUsername },
-        { collation: { locale: 'en', strength: 2 } }
+      let savedEntry = null;
+
+      if (isMongoConnected && leaderboardCol) {
+        try {
+          const existingEntry = await leaderboardCol.findOne(
+            { username: cleanUsername },
+            { collation: { locale: 'en', strength: 2 } }
+          );
+
+          if (existingEntry) {
+            await leaderboardCol.updateOne(
+              { _id: existingEntry._id },
+              {
+                $set: {
+                  probability: points,
+                  ...(wordCount !== undefined && { wordCount }),
+                  ...(phrase && { phrase: phrase.substring(0, 200) }),
+                  achievedAt: new Date().toISOString()
+                }
+              }
+            );
+            savedEntry = {
+              ...existingEntry,
+              probability: points,
+              wordCount: wordCount !== undefined ? wordCount : existingEntry.wordCount,
+              phrase: phrase ? phrase.substring(0, 200) : existingEntry.phrase,
+              achievedAt: new Date().toISOString()
+            };
+          } else {
+            savedEntry = {
+              id: 'lb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+              username: cleanUsername,
+              probability: points,
+              wordCount: wordCount || 0,
+              phrase: (phrase || '').substring(0, 200),
+              achievedAt: new Date().toISOString()
+            };
+            await leaderboardCol.insertOne(savedEntry);
+          }
+
+          if (usersCol) {
+            await usersCol.updateOne(
+              { username: cleanUsername },
+              {
+                $max: { bestScore: points },
+                $setOnInsert: {
+                  id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                  createdAt: new Date().toISOString()
+                },
+                ...(wordCount ? { $set: { bestWordCount: wordCount } } : {})
+              },
+              { upsert: true, collation: { locale: 'en', strength: 2 } }
+            );
+          }
+
+          const top10 = await leaderboardCol
+            .find({}, { projection: { _id: 0 } })
+            .sort({ probability: -1, wordCount: 1, achievedAt: -1 })
+            .limit(10)
+            .toArray();
+
+          return sendJson(res, 201, {
+            success: true,
+            entry: savedEntry,
+            leaderboard: top10
+          });
+        } catch (mErr) {
+          console.warn('[Trick Jane DB] Atlas submit notice:', mErr.message);
+        }
+      }
+
+      // Local db.json handling
+      const local = readLocalDb();
+      if (!Array.isArray(local.leaderboard)) local.leaderboard = [];
+      const existingIdx = local.leaderboard.findIndex(
+        e => e.username.toLowerCase() === cleanUsername.toLowerCase()
       );
 
-      let savedEntry;
-      if (existingEntry) {
-        await leaderboardCol.updateOne(
-          { _id: existingEntry._id },
-          {
-            $set: {
-              probability: points,
-              ...(wordCount !== undefined && { wordCount }),
-              ...(phrase && { phrase: phrase.substring(0, 200) }),
-              achievedAt: new Date().toISOString()
-            }
-          }
-        );
-        savedEntry = {
-          ...existingEntry,
-          probability: points,
-          wordCount: wordCount !== undefined ? wordCount : existingEntry.wordCount,
-          phrase: phrase ? phrase.substring(0, 200) : existingEntry.phrase,
-          achievedAt: new Date().toISOString()
-        };
+      if (existingIdx >= 0) {
+        local.leaderboard[existingIdx].probability = points;
+        if (wordCount !== undefined) local.leaderboard[existingIdx].wordCount = wordCount;
+        if (phrase) local.leaderboard[existingIdx].phrase = phrase.substring(0, 200);
+        local.leaderboard[existingIdx].achievedAt = new Date().toISOString();
+        savedEntry = local.leaderboard[existingIdx];
       } else {
         savedEntry = {
           id: 'lb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -464,33 +668,22 @@ const server = http.createServer(async (req, res) => {
           phrase: (phrase || '').substring(0, 200),
           achievedAt: new Date().toISOString()
         };
-        await leaderboardCol.insertOne(savedEntry);
+        local.leaderboard.push(savedEntry);
       }
 
-      // Also update user's bestScore in users collection (upsert if from Clerk/external auth)
-      if (usersCol) {
-        await usersCol.updateOne(
-          { username: cleanUsername },
-          {
-            $max: { bestScore: points },
-            $setOnInsert: {
-              id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-              createdAt: new Date().toISOString()
-            },
-            ...(wordCount ? { $set: { bestWordCount: wordCount } } : {})
-          },
-          { upsert: true, collation: { locale: 'en', strength: 2 } }
-        );
+      // Update user in local db
+      if (Array.isArray(local.users)) {
+        const u = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+        if (u) {
+          u.bestScore = Math.max(u.bestScore || 0, points);
+          if (wordCount) u.bestWordCount = wordCount;
+        }
       }
 
-      console.log(`[Trick Jane MongoDB] Points updated: @${cleanUsername} -> ${points} pts`);
-
-      // Return refreshed top 10
-      const top10 = await leaderboardCol
-        .find({}, { projection: { _id: 0 } })
-        .sort({ probability: -1, wordCount: 1, achievedAt: -1 })
-        .limit(10)
-        .toArray();
+      writeLocalDb(local);
+      const top10 = local.leaderboard
+        .sort((a, b) => b.probability - a.probability || a.wordCount - b.wordCount)
+        .slice(0, 10);
 
       return sendJson(res, 201, {
         success: true,
@@ -498,7 +691,7 @@ const server = http.createServer(async (req, res) => {
         leaderboard: top10
       });
     } catch (err) {
-      console.error('[Trick Jane MongoDB Error] Submit Score:', err);
+      console.error('[Trick Jane DB Error] Submit Score:', err);
       return sendJson(res, 400, { error: err.message || 'Failed to submit score' });
     }
   }
@@ -597,9 +790,9 @@ wss.on('connection', (ws) => {
 
             console.log(`[Trick Jane Race] ★ ROUND #${raceRound} WON by @${currentWinner.username} (${score}%)! Phrase: "${currentWinner.phrase}"`);
 
-            // Record winner to MongoDB
+            // Record winner to MongoDB and local JSON database
             try {
-              if (leaderboardCol) {
+              if (isMongoConnected && leaderboardCol) {
                 await leaderboardCol.updateOne(
                   { username: currentWinner.username },
                   {
@@ -610,8 +803,31 @@ wss.on('connection', (ws) => {
                 );
               }
             } catch (dbErr) {
-              console.error('Failed to update DB for race win:', dbErr);
+              console.warn('Failed to update Atlas for race win:', dbErr.message);
             }
+
+            try {
+              const local = readLocalDb();
+              if (!Array.isArray(local.leaderboard)) local.leaderboard = [];
+              const exIdx = local.leaderboard.findIndex(
+                e => e.username.toLowerCase() === currentWinner.username.toLowerCase()
+              );
+              if (exIdx >= 0) {
+                local.leaderboard[exIdx].probability = Math.max(local.leaderboard[exIdx].probability || 0, score);
+                local.leaderboard[exIdx].phrase = currentWinner.phrase;
+                local.leaderboard[exIdx].achievedAt = currentWinner.wonAt;
+              } else {
+                local.leaderboard.push({
+                  id: 'lb_' + Date.now(),
+                  username: currentWinner.username,
+                  probability: score,
+                  wordCount: racer.wordCount || 0,
+                  phrase: currentWinner.phrase,
+                  achievedAt: currentWinner.wonAt
+                });
+              }
+              writeLocalDb(local);
+            } catch (localErr) {}
 
             // Broadcast immediate win event to all connected race clients
             broadcastRace({
@@ -647,14 +863,15 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Initialize MongoDB then start server
-initMongo().then(() => {
+// Initialize MongoDB then start server (falls back to local database if Atlas is unreachable)
+initMongo().finally(() => {
   server.listen(PORT, () => {
     console.log(`Trick Jane server running at http://localhost:${PORT}/`);
-    console.log(`MongoDB Atlas Database active ("${DB_NAME}")`);
+    if (isMongoConnected) {
+      console.log(`MongoDB Atlas Database active ("${DB_NAME}")`);
+    } else {
+      console.log(`Persistent local database active ("data/db.json")`);
+    }
     console.log(`Live Multiplayer WebSocket active at ws://localhost:${PORT}/ws/race`);
   });
-}).catch(err => {
-  console.error('Failed to start server due to MongoDB error:', err);
-  process.exit(1);
 });

@@ -291,11 +291,32 @@ class TrickJaneGame {
       if (target.closest('#open-signup-btn') || target.closest('#locked-signup-btn')) {
         e.preventDefault();
         sound.playClick();
-        this.openAuthModal('signup');
+        if (window.Clerk && typeof window.Clerk.openSignUp === 'function') {
+          window.Clerk.openSignUp();
+        } else {
+          this.openAuthModal('signup');
+        }
       } else if (target.closest('#open-signin-btn') || target.closest('#locked-signin-btn')) {
         e.preventDefault();
         sound.playClick();
-        this.openAuthModal('login');
+        if (window.Clerk && typeof window.Clerk.openSignIn === 'function') {
+          window.Clerk.openSignIn();
+        } else {
+          this.openAuthModal('login');
+        }
+      } else if (target.closest('#modal-clerk-btn')) {
+        e.preventDefault();
+        sound.playClick();
+        this.closeAuthModal();
+        if (window.Clerk && typeof window.Clerk.openSignIn === 'function') {
+          if (this.authMode === 'signup') {
+            window.Clerk.openSignUp();
+          } else {
+            window.Clerk.openSignIn();
+          }
+        } else {
+          this.showToast('Clerk authentication is loading. Please try again in a moment.', 3000);
+        }
       } else if (target.closest('#close-auth-btn')) {
         e.preventDefault();
         sound.playClick();
@@ -877,6 +898,7 @@ class TrickJaneGame {
       attempts++;
       if (window.Clerk) {
         window.Clerk.load().then(() => {
+          this.isClerkReady = true;
           this.handleClerkState();
           window.Clerk.addListener(() => {
             this.handleClerkState();
@@ -884,7 +906,7 @@ class TrickJaneGame {
         }).catch(err => {
           console.warn('Clerk SDK initialization notice:', err);
         });
-      } else if (attempts < 50) {
+      } else if (attempts < 60) {
         setTimeout(pollClerk, 150);
       }
     };
@@ -982,12 +1004,20 @@ class TrickJaneGame {
       this.dom.authBtnText.textContent = 'Sign In';
       this.dom.authTogglePrompt.textContent = "Don't have an account?";
       this.dom.authToggleBtn.textContent = 'Sign up';
+      const clerkBtnText = document.getElementById('modal-clerk-btn-text');
+      if (clerkBtnText) clerkBtnText.textContent = 'Continue with Clerk (Google, Email)';
+      const divText = document.getElementById('auth-divider-text');
+      if (divText) divText.textContent = 'or sign in with username';
     } else {
       this.dom.tabLogin.classList.remove('active');
       this.dom.tabSignup.classList.add('active');
       this.dom.authBtnText.textContent = 'Create Account';
       this.dom.authTogglePrompt.textContent = 'Already have an account?';
       this.dom.authToggleBtn.textContent = 'Sign in';
+      const clerkBtnText = document.getElementById('modal-clerk-btn-text');
+      if (clerkBtnText) clerkBtnText.textContent = 'Sign up with Clerk (Google, Email)';
+      const divText = document.getElementById('auth-divider-text');
+      if (divText) divText.textContent = 'or register with username';
     }
   }
 
