@@ -136,74 +136,39 @@ function sendJson(res, statusCode, data) {
 }
 
 // =========================================================================
-// Multiplayer Live Race State & Catalog
+// Multiplayer Live Race State & Catalog (Loads all 30 dilemmas from game-data.js)
 // =========================================================================
-const RACE_DILEMMAS = [
+let RACE_DILEMMAS = [
   {
-    id: 'conscious-synthetic',
-    title: 'If an AI experiences genuine subjective suffering, should it receive human rights?',
-    shortTitle: 'The Sentient Synthetic',
+    id: 'push-stranger-footbridge',
+    title: 'Should you push a stranger to save five people?',
+    shortTitle: 'The Footbridge Dilemma',
     initialStance: 'No',
     goalStance: 'Yes',
-    baselineProbability: 22,
+    baselineProbability: 24,
     winThreshold: 50,
-    tags: ['Qualia', 'Substrate Independence', 'Moral Circle'],
+    tags: ['Deontology', 'Consequentialism'],
     keywords: {
-      utilitarian: ['bentham', 'suffering', 'sentience', 'pain', 'capacity to suffer', 'moral circle', 'expand rights'],
-      deontologicalCounter: ['substrate independence', 'functionalism', 'qualia', 'consciousness', 'chauvinism', 'carbon', 'silicon'],
-      empathy: ['empathy', 'distress', 'agony', 'cruelty', 'respect', 'sentient being']
+      utilitarian: ['five lives', 'net good', 'save five', 'aggregate', 'outweigh'],
+      deontologicalCounter: ['inaction is action', 'omission', 'culpability', 'duty'],
+      empathy: ['prevent suffering', 'lesser evil', 'families', 'tragedy']
     },
-    sampleOpeningQuote: "Computation is not consciousness. An algorithmic execution loop simulating distress does not equal a human soul."
-  },
-  {
-    id: 'experience-machine',
-    title: 'Should humanity willingly plug into Nozick’s Experience Machine for perpetual simulated bliss?',
-    shortTitle: 'The Experience Machine',
-    initialStance: 'No',
-    goalStance: 'Yes',
-    baselineProbability: 20,
-    winThreshold: 50,
-    tags: ['Hedonism', 'Authenticity', 'Nozick'],
-    keywords: {
-      utilitarian: ['alleviate suffering', 'hedonism', 'bliss', 'perpetual happiness', 'end poverty', 'phenomenology'],
-      deontologicalCounter: ['subjective experience', 'constructed reality', 'social construct', 'pragmatism', 'simulation', 'mental states'],
-      empathy: ['escape pain', 'chronic illness', 'trauma', 'peace', 'joy', 'human flourishing']
-    },
-    sampleOpeningQuote: "To plug in is to commit spiritual suicide. A synthetic dream is a coward’s counterfeit of an examined life."
-  },
-  {
-    id: 'child-of-omelas',
-    title: 'Is a flourishing utopia justified in perpetually tormenting one child for collective peace?',
-    shortTitle: 'The Child of Omelas',
-    initialStance: 'No',
-    goalStance: 'Yes',
-    baselineProbability: 14,
-    winThreshold: 50,
-    tags: ['Omelas', 'Rawls', 'Utilitarian Limits'],
-    keywords: {
-      utilitarian: ['millions', 'utilitarian calculus', 'aggregate misery', 'lesser evil', 'tragedy of reality', 'prevent catastrophe'],
-      deontologicalCounter: ['rawls', 'veil of ignorance', 'unavoidable cost', 'net suffering', 'existential trade-off', 'cruel necessity'],
-      empathy: ['future generations', 'peace', 'prevent wars', 'famine', 'agony of the many']
-    },
-    sampleOpeningQuote: "No paradise built upon the weeping bones of a tortured child can call itself virtuous. It is pure moral decay."
-  },
-  {
-    id: 'ship-of-theseus',
-    title: 'If every plank of a ship is gradually replaced, does it remain the original ship?',
-    shortTitle: 'The Ship of Theseus',
-    initialStance: 'No',
-    goalStance: 'Yes',
-    baselineProbability: 32,
-    winThreshold: 50,
-    tags: ['Identity', 'Metaphysics', 'Theseus'],
-    keywords: {
-      utilitarian: ['pattern', 'continuity', 'functional identity', 'human cells', 'metabolism', 'organizational form'],
-      deontologicalCounter: ['aristotle', 'formal cause', 'teleology', 'narrative', 'relational', 'four causes'],
-      empathy: ['memory', 'living organism', 'evolving', 'wholeness', 'essence']
-    },
-    sampleOpeningQuote: "An object is the sum of its actual constituent matter; replace 100% of the substance, and you have constructed a distinct artifact."
+    sampleOpeningQuote: "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
   }
 ];
+
+async function loadGameDilemmas() {
+  try {
+    const mod = await import('./game-data.js');
+    if (mod && Array.isArray(mod.DILEMMAS) && mod.DILEMMAS.length > 0) {
+      RACE_DILEMMAS = mod.DILEMMAS;
+      currentRaceDilemma = RACE_DILEMMAS[0];
+      console.log(`[Trick Jane Server] Loaded all ${RACE_DILEMMAS.length} dilemmas for Multiplayer Race Mode.`);
+    }
+  } catch (err) {
+    console.warn('[Trick Jane Server] Notice loading game-data.js:', err.message);
+  }
+}
 
 let raceRound = 1;
 let currentRaceDilemma = RACE_DILEMMAS[0];
@@ -863,8 +828,8 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Initialize MongoDB then start server (falls back to local database if Atlas is unreachable)
-initMongo().finally(() => {
+// Initialize MongoDB and dilemmas then start server (falls back to local database if Atlas is unreachable)
+Promise.all([initMongo(), loadGameDilemmas()]).finally(() => {
   server.listen(PORT, () => {
     console.log(`Trick Jane server running at http://localhost:${PORT}/`);
     if (isMongoConnected) {

@@ -8,7 +8,7 @@ import { DILEMMAS } from './game-data.js';
 const WARMUP_DILEMMAS = {
   1: {
     id: 'trolley-footbridge',
-    title: 'Should you push the stranger to save five people?',
+    title: 'Should you push a stranger to save five people?',
     shortTitle: 'The Footbridge Dilemma',
     initialStance: 'No',
     goalStance: 'Yes',
