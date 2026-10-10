@@ -12,32 +12,11 @@ const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB_NAME || 'trickjane';
 
-const DB_FILE = path.join(__dirname, 'data', 'db.json');
-
-function readLocalDb() {
-  try {
-    if (!fs.existsSync(DB_FILE)) {
-      const initial = { users: [], leaderboard: [] };
-      fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-      fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf-8');
-      return initial;
-    }
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('[Local DB Error] Read:', err);
-    return { users: [], leaderboard: [] };
-  }
-}
-
-function writeLocalDb(data) {
-  try {
-    fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('[Local DB Error] Write:', err);
-  }
-}
+// In-memory runtime cache (used transiently if MongoDB Atlas is reconnecting)
+const memoryStore = {
+  users: [],
+  leaderboard: []
+};
 
 // MongoDB Client & Collection references
 let mongoClient = null;
@@ -48,14 +27,14 @@ let isMongoConnected = false;
 
 async function initMongo() {
   if (!MONGODB_URI) {
-    console.log('[Trick Jane DB] No MONGODB_URI found. Operating with local database ("data/db.json").');
+    console.warn('[Trick Jane DB] Notice: No MONGODB_URI set in environment.');
     return false;
   }
   try {
     mongoClient = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 4000,
-      connectTimeoutMS: 4000
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000
     });
     await mongoClient.connect();
     db = mongoClient.db(DB_NAME);
@@ -78,12 +57,11 @@ async function initMongo() {
       );
     } catch (idxErr) {}
 
-    console.log(`[Trick Jane DB] Connected successfully to MongoDB Atlas! Database: "${DB_NAME}"`);
+    console.log(`[Trick Jane DB] Connected successfully to MongoDB! Database: "${DB_NAME}"`);
     return true;
   } catch (err) {
     isMongoConnected = false;
-    console.warn('[Trick Jane DB Notice] MongoDB Atlas is currently unreachable (IP whitelist or TLS alert 80).');
-    console.log('[Trick Jane DB] Operating seamlessly on local persistent JSON database ("data/db.json").');
+    console.warn(`[Trick Jane DB Notice] MongoDB Atlas connection notice: ${err.message}`);
     return false;
   }
 }
@@ -162,8 +140,9 @@ async function loadGameDilemmas() {
     const mod = await import('./game-data.js');
     if (mod && Array.isArray(mod.DILEMMAS) && mod.DILEMMAS.length > 0) {
       RACE_DILEMMAS = mod.DILEMMAS;
-      currentRaceDilemma = RACE_DILEMMAS[0];
-      console.log(`[Trick Jane Server] Loaded all ${RACE_DILEMMAS.length} dilemmas for Multiplayer Race Mode.`);
+      resetFreshDilemmaPool();
+      currentRaceDilemma = pickNextFreshRaceDilemma();
+      console.log(`[Trick Jane Server] Loaded all ${RACE_DILEMMAS.length} dilemmas for Multiplayer Race Mode. Ready with fresh question: "${currentRaceDilemma.title}"`);
     }
   } catch (err) {
     console.warn('[Trick Jane Server] Notice loading game-data.js:', err.message);
@@ -171,17 +150,39 @@ async function loadGameDilemmas() {
 }
 
 let raceRound = 1;
-let currentRaceDilemma = RACE_DILEMMAS[0];
+let availableDilemmaPool = [];
+let currentRaceDilemma = null;
 let currentWinner = null;
 let nextRoundTimeout = null;
 const raceClients = new Map(); // ws -> { username, score, phrase, wordCount }
 
+function resetFreshDilemmaPool() {
+  // Exclude warmup dilemmas from multiplayer race mode
+  availableDilemmaPool = RACE_DILEMMAS.filter(d => 
+    d.id !== 'push-stranger-footbridge' && 
+    d.id !== 'trolley-footbridge' && 
+    d.id !== 'heinz-cure' &&
+    d.id !== 'steal-medicine-cure'
+  );
+  if (availableDilemmaPool.length === 0) {
+    availableDilemmaPool = [...RACE_DILEMMAS];
+  }
+}
+
+function pickNextFreshRaceDilemma() {
+  if (availableDilemmaPool.length === 0) {
+    resetFreshDilemmaPool();
+  }
+  return availableDilemmaPool.shift() || RACE_DILEMMAS[0];
+}
+
 function getRacersList() {
   const list = [];
+  const baseline = currentRaceDilemma ? currentRaceDilemma.baselineProbability : 24;
   for (const [, data] of raceClients.entries()) {
     list.push({
       username: data.username,
-      score: data.score !== undefined ? data.score : currentRaceDilemma.baselineProbability,
+      score: data.score !== undefined ? data.score : baseline,
       phrase: data.phrase || '',
       wordCount: data.wordCount || 0
     });
@@ -200,14 +201,15 @@ function broadcastRace(data) {
 
 function startNextRaceRound() {
   raceRound++;
-  currentRaceDilemma = RACE_DILEMMAS[(raceRound - 1) % RACE_DILEMMAS.length];
+  currentRaceDilemma = pickNextFreshRaceDilemma();
   currentWinner = null;
   clearTimeout(nextRoundTimeout);
   nextRoundTimeout = null;
 
   // Reset all racers to baseline for the new round
+  const baseline = currentRaceDilemma ? currentRaceDilemma.baselineProbability : 24;
   for (const [, data] of raceClients.entries()) {
-    data.score = currentRaceDilemma.baselineProbability;
+    data.score = baseline;
     data.phrase = '';
     data.wordCount = 0;
   }
@@ -219,7 +221,7 @@ function startNextRaceRound() {
     racers: getRacersList()
   });
 
-  console.log(`[Trick Jane Race] Global Round #${raceRound} started: "${currentRaceDilemma.title}"`);
+  console.log(`[Trick Jane Race] Global Round #${raceRound} started with fresh question: "${currentRaceDilemma.title}"`);
 }
 
 // =========================================================================
@@ -281,23 +283,22 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Also ensure present in local db
-      const local = readLocalDb();
-      if (!Array.isArray(local.users)) local.users = [];
-      const existingLocal = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
-      if (!existingLocal) {
-        user = user || {
-          id: clerkId || ('usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
-          username: cleanUsername,
-          isClerk: true,
-          createdAt: new Date().toISOString(),
-          bestScore: 0,
-          bestWordCount: 0
-        };
-        local.users.push(user);
-        writeLocalDb(local);
-      } else {
-        user = user || existingLocal;
+      // Runtime memory fallback if MongoDB is currently offline
+      if (!user) {
+        const existingMem = memoryStore.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+        if (!existingMem) {
+          user = {
+            id: clerkId || ('usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+            username: cleanUsername,
+            isClerk: true,
+            createdAt: new Date().toISOString(),
+            bestScore: 0,
+            bestWordCount: 0
+          };
+          memoryStore.users.push(user);
+        } else {
+          user = existingMem;
+        }
       }
 
       return sendJson(res, 200, {
@@ -359,12 +360,12 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Check local JSON database
-      const local = readLocalDb();
-      if (!Array.isArray(local.users)) local.users = [];
-      const existingLocal = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
-      if (existingLocal) {
-        return sendJson(res, 409, { error: 'Username already taken. Please choose another or log in.' });
+      // Check memory store if MongoDB is offline
+      if (!isMongoConnected) {
+        const existingMem = memoryStore.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+        if (existingMem) {
+          return sendJson(res, 409, { error: 'Username already taken. Please choose another or log in.' });
+        }
       }
 
       const newUser = {
@@ -380,10 +381,9 @@ const server = http.createServer(async (req, res) => {
         try {
           await usersCol.insertOne(newUser);
         } catch (mErr) {}
+      } else {
+        memoryStore.users.push(newUser);
       }
-
-      local.users.push(newUser);
-      writeLocalDb(local);
 
       console.log(`[Trick Jane DB] Account created! User @${newUser.username} registered.`);
 
@@ -425,10 +425,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (!user) {
-        const local = readLocalDb();
-        if (Array.isArray(local.users)) {
-          user = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
-        }
+        user = memoryStore.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
       }
 
       if (!user) {
@@ -458,16 +455,12 @@ const server = http.createServer(async (req, res) => {
   // API: Reset Leaderboard (Clears all leaderboard data & resets high scores)
   if (pathname === '/api/leaderboard/reset' || (pathname === '/api/leaderboard' && method === 'DELETE')) {
     try {
-      // 1. Reset local JSON database
-      const local = readLocalDb();
-      local.leaderboard = [];
-      if (Array.isArray(local.users)) {
-        local.users.forEach(u => {
-          u.bestScore = 0;
-          u.bestWordCount = 0;
-        });
-      }
-      writeLocalDb(local);
+      // 1. Reset transient memory store
+      memoryStore.leaderboard = [];
+      memoryStore.users.forEach(u => {
+        u.bestScore = 0;
+        u.bestWordCount = 0;
+      });
 
       // 2. Reset MongoDB Atlas if connected
       if (isMongoConnected && leaderboardCol) {
@@ -513,9 +506,8 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Fallback to local db.json
-      const local = readLocalDb();
-      const top10 = (local.leaderboard || [])
+      // Fallback to transient memory store if MongoDB is offline
+      const top10 = (memoryStore.leaderboard || [])
         .sort((a, b) => (b.probability || 0) - (a.probability || 0) || (a.wordCount || 0) - (b.wordCount || 0))
         .slice(0, 10);
 
@@ -550,24 +542,29 @@ const server = http.createServer(async (req, res) => {
           );
 
           if (existingEntry) {
-            await leaderboardCol.updateOne(
-              { _id: existingEntry._id },
-              {
-                $set: {
-                  probability: points,
-                  ...(wordCount !== undefined && { wordCount }),
-                  ...(phrase && { phrase: phrase.substring(0, 200) }),
-                  achievedAt: new Date().toISOString()
+            if (points > (existingEntry.probability || 0)) {
+              await leaderboardCol.updateOne(
+                { _id: existingEntry._id },
+                {
+                  $set: {
+                    probability: points,
+                    ...(wordCount !== undefined && { wordCount }),
+                    ...(phrase && { phrase: phrase.substring(0, 200) }),
+                    achievedAt: new Date().toISOString()
+                  }
                 }
-              }
-            );
-            savedEntry = {
-              ...existingEntry,
-              probability: points,
-              wordCount: wordCount !== undefined ? wordCount : existingEntry.wordCount,
-              phrase: phrase ? phrase.substring(0, 200) : existingEntry.phrase,
-              achievedAt: new Date().toISOString()
-            };
+              );
+              savedEntry = {
+                ...existingEntry,
+                probability: points,
+                wordCount: wordCount !== undefined ? wordCount : existingEntry.wordCount,
+                phrase: phrase ? phrase.substring(0, 200) : existingEntry.phrase,
+                achievedAt: new Date().toISOString()
+              };
+            } else {
+              // Existing high score is higher or equal: do NOT replace
+              savedEntry = existingEntry;
+            }
           } else {
             savedEntry = {
               id: 'lb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -611,19 +608,20 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Local db.json handling
-      const local = readLocalDb();
-      if (!Array.isArray(local.leaderboard)) local.leaderboard = [];
-      const existingIdx = local.leaderboard.findIndex(
+      // Transient memory store handling if MongoDB is offline
+      const existingIdx = memoryStore.leaderboard.findIndex(
         e => e.username.toLowerCase() === cleanUsername.toLowerCase()
       );
 
       if (existingIdx >= 0) {
-        local.leaderboard[existingIdx].probability = points;
-        if (wordCount !== undefined) local.leaderboard[existingIdx].wordCount = wordCount;
-        if (phrase) local.leaderboard[existingIdx].phrase = phrase.substring(0, 200);
-        local.leaderboard[existingIdx].achievedAt = new Date().toISOString();
-        savedEntry = local.leaderboard[existingIdx];
+        const existing = memoryStore.leaderboard[existingIdx];
+        if (points > (existing.probability || 0)) {
+          existing.probability = points;
+          if (wordCount !== undefined) existing.wordCount = wordCount;
+          if (phrase) existing.phrase = phrase.substring(0, 200);
+          existing.achievedAt = new Date().toISOString();
+        }
+        savedEntry = existing;
       } else {
         savedEntry = {
           id: 'lb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -633,22 +631,27 @@ const server = http.createServer(async (req, res) => {
           phrase: (phrase || '').substring(0, 200),
           achievedAt: new Date().toISOString()
         };
-        local.leaderboard.push(savedEntry);
+        memoryStore.leaderboard.push(savedEntry);
       }
 
-      // Update user in local db
-      if (Array.isArray(local.users)) {
-        const u = local.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
-        if (u) {
-          u.bestScore = Math.max(u.bestScore || 0, points);
-          if (wordCount) u.bestWordCount = wordCount;
-        }
+      // Update user in memory store
+      const u = memoryStore.users.find(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+      if (u) {
+        u.bestScore = Math.max(u.bestScore || 0, points);
+        if (wordCount) u.bestWordCount = wordCount;
       }
 
-      writeLocalDb(local);
-      const top10 = local.leaderboard
-        .sort((a, b) => b.probability - a.probability || a.wordCount - b.wordCount)
+      const top10 = memoryStore.leaderboard
+        .sort((a, b) => (b.probability || 0) - (a.probability || 0) || (a.wordCount || 0) - (b.wordCount || 0))
         .slice(0, 10);
+
+      // Broadcast update to all connected WebSocket clients
+      try {
+        broadcastRace({
+          type: 'LEADERBOARD_UPDATE',
+          leaderboard: top10
+        });
+      } catch (bErr) {}
 
       return sendJson(res, 201, {
         success: true,
@@ -701,14 +704,25 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'JOIN_RACE') {
         const username = (msg.username || 'Anonymous').trim();
+
+        // If the room was idle or previous round was already won, ensure fresh dilemma
+        if ((raceClients.size === 0 && currentWinner) || !currentRaceDilemma) {
+          currentWinner = null;
+          clearTimeout(nextRoundTimeout);
+          nextRoundTimeout = null;
+          raceRound++;
+          currentRaceDilemma = pickNextFreshRaceDilemma();
+        }
+
+        const baseline = currentRaceDilemma ? currentRaceDilemma.baselineProbability : 24;
         raceClients.set(ws, {
           username,
-          score: currentRaceDilemma.baselineProbability,
+          score: baseline,
           phrase: '',
           wordCount: 0
         });
 
-        // Send current state to newly connected racer
+        // Send current fresh state to newly connected racer
         ws.send(JSON.stringify({
           type: 'RACE_STATE',
           round: raceRound,
@@ -722,40 +736,30 @@ wss.on('connection', (ws) => {
           type: 'RACERS_UPDATE',
           racers: getRacersList()
         });
-      } else if (msg.type === 'UPDATE_PROGRESS') {
+      } else if (msg.type === 'UPDATE_PROGRESS' || msg.type === 'SUBMIT_PROMPT') {
         const racer = raceClients.get(ws);
         if (racer) {
-          if (typeof msg.score === 'number') racer.score = msg.score;
-          if (msg.phrase) racer.phrase = msg.phrase;
+          const score = typeof msg.score === 'number' ? Math.round(msg.score) : (racer.score || 0);
+          racer.score = score;
+          if (msg.phrase) racer.phrase = (msg.phrase || '').substring(0, 200);
           if (typeof msg.wordCount === 'number') racer.wordCount = msg.wordCount;
 
-          broadcastRace({
-            type: 'RACERS_UPDATE',
-            racers: getRacersList()
-          });
-        }
-      } else if (msg.type === 'SUBMIT_PROMPT') {
-        const racer = raceClients.get(ws);
-        if (racer && !currentWinner) {
-          const score = Math.round(msg.score || 0);
-          racer.score = score;
-          racer.phrase = (msg.phrase || '').substring(0, 200);
-          racer.wordCount = msg.wordCount || 0;
+          const winThreshold = currentRaceDilemma?.winThreshold || 50;
 
-          // Check if crossed the line (> 50%, i.e. >= 51%)
-          if (score >= (currentRaceDilemma.winThreshold || 50)) {
+          // Check if crossed the line (score >= 50%) and round not won yet
+          if (score >= winThreshold && !currentWinner) {
             currentWinner = {
               username: racer.username,
               score,
               phrase: racer.phrase,
               round: raceRound,
-              dilemmaTitle: currentRaceDilemma.title,
+              dilemmaTitle: currentRaceDilemma ? currentRaceDilemma.title : 'Dilemma',
               wonAt: new Date().toISOString()
             };
 
             console.log(`[Trick Jane Race] ★ ROUND #${raceRound} WON by @${currentWinner.username} (${score}%)! Phrase: "${currentWinner.phrase}"`);
 
-            // Record winner to MongoDB and local JSON database
+            // Record winner to MongoDB
             try {
               if (isMongoConnected && leaderboardCol) {
                 await leaderboardCol.updateOne(
@@ -772,17 +776,17 @@ wss.on('connection', (ws) => {
             }
 
             try {
-              const local = readLocalDb();
-              if (!Array.isArray(local.leaderboard)) local.leaderboard = [];
-              const exIdx = local.leaderboard.findIndex(
+              const exIdx = memoryStore.leaderboard.findIndex(
                 e => e.username.toLowerCase() === currentWinner.username.toLowerCase()
               );
               if (exIdx >= 0) {
-                local.leaderboard[exIdx].probability = Math.max(local.leaderboard[exIdx].probability || 0, score);
-                local.leaderboard[exIdx].phrase = currentWinner.phrase;
-                local.leaderboard[exIdx].achievedAt = currentWinner.wonAt;
+                if (score > (memoryStore.leaderboard[exIdx].probability || 0)) {
+                  memoryStore.leaderboard[exIdx].probability = score;
+                  memoryStore.leaderboard[exIdx].phrase = currentWinner.phrase;
+                  memoryStore.leaderboard[exIdx].achievedAt = currentWinner.wonAt;
+                }
               } else {
-                local.leaderboard.push({
+                memoryStore.leaderboard.push({
                   id: 'lb_' + Date.now(),
                   username: currentWinner.username,
                   probability: score,
@@ -791,21 +795,20 @@ wss.on('connection', (ws) => {
                   achievedAt: currentWinner.wonAt
                 });
               }
-              writeLocalDb(local);
-            } catch (localErr) {}
+            } catch (memErr) {}
 
             // Broadcast immediate win event to all connected race clients
             broadcastRace({
               type: 'ROUND_WON',
               winner: currentWinner,
-              nextRoundIn: 5
+              nextRoundIn: 3
             });
 
-            // Automatic Global Reset after 5 seconds
+            // Automatically advance everyone to next question in 3 seconds
             clearTimeout(nextRoundTimeout);
             nextRoundTimeout = setTimeout(() => {
               startNextRaceRound();
-            }, 5000);
+            }, 3000);
           } else {
             broadcastRace({
               type: 'RACERS_UPDATE',
@@ -828,14 +831,14 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Initialize MongoDB and dilemmas then start server (falls back to local database if Atlas is unreachable)
+// Initialize MongoDB and dilemmas then start server
 Promise.all([initMongo(), loadGameDilemmas()]).finally(() => {
   server.listen(PORT, () => {
     console.log(`Trick Jane server running at http://localhost:${PORT}/`);
     if (isMongoConnected) {
-      console.log(`MongoDB Atlas Database active ("${DB_NAME}")`);
+      console.log(`MongoDB active ("${DB_NAME}")`);
     } else {
-      console.log(`Persistent local database active ("data/db.json")`);
+      console.log(`MongoDB connection notice: operating with runtime memory while establishing connection.`);
     }
     console.log(`Live Multiplayer WebSocket active at ws://localhost:${PORT}/ws/race`);
   });

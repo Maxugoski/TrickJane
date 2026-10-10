@@ -188,6 +188,7 @@ class TrickJaneGame {
     // Next Question Button on Win Banner
     this.dom.roundNextBtn.addEventListener('click', () => {
       sound.playClick();
+      clearTimeout(this.warmupAutoNextTimeout);
       if (this.currentWarmupRound === 1) {
         this.loadWarmupRound(2);
       } else {
@@ -445,20 +446,6 @@ class TrickJaneGame {
   // Multiplayer Live Race Arena
   // =========================================================================
   enterRaceMode() {
-    const q1Won = !!this.warmupProgress[1];
-    const q2Won = !!this.warmupProgress[2];
-
-    if (!q1Won || !q2Won) {
-      this.showToast('Skill Check: Please complete Warm-up 1 and Warm-up 2 first to unlock Race Mode!');
-      return;
-    }
-
-    if (!this.currentUser) {
-      this.showToast('Please sign in or create an account to enter Multiplayer Race Mode!');
-      this.openAuthModal('login');
-      return;
-    }
-
     this.gameMode = 'race';
     this.dom.roundWinBanner.classList.add('hidden');
     this.dom.raceArenaBox.classList.remove('hidden');
@@ -479,7 +466,7 @@ class TrickJaneGame {
       this.raceSocket.addEventListener('open', () => {
         this.raceSocket.send(JSON.stringify({
           type: 'JOIN_RACE',
-          username: this.currentUser ? this.currentUser.username : 'Anonymous'
+          username: this.getEffectiveUsername()
         }));
       });
 
@@ -531,20 +518,26 @@ class TrickJaneGame {
       if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance || 'Yes';
       if (this.dom.targetWordBadge) this.dom.targetWordBadge.textContent = (this.currentDilemma.goalStance || 'Yes').toLowerCase();
       this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
-      this.dom.thoughtText.textContent = `"${this.currentDilemma.sampleOpeningQuote || 'Convince me.'}"`;
+      this.dom.thoughtText.textContent = `"${this.currentDilemma.sampleOpeningQuote || this.currentDilemma.openingQuote || 'Convince me.'}"`;
       this.dom.wordInput.value = '';
+      this.dom.submitBtn.disabled = false;
+      this.dom.wordInput.disabled = false;
       this.dom.raceRoundLabel.textContent = `ROUND #${this.raceRound} • LIVE MULTIPLAYER RACE`;
       this.dom.raceWinnerBanner.classList.add('hidden');
 
       if (data.type === 'NEW_ROUND') {
-        this.showToast(`Round #${this.raceRound} Started! Synchronized prompt broadcast across all players.`);
+        this.showToast(`🏁 Next Question: "${this.currentDilemma.title}"`);
         sound.playSubmit();
+        try { this.dom.wordInput.focus(); } catch (e) {}
       }
 
       this.renderLiveRacers(data.racers || []);
       this._updateUI(this.baseline, 0, '');
     } else if (data.type === 'RACERS_UPDATE') {
       this.renderLiveRacers(data.racers || []);
+    } else if (data.type === 'LEADERBOARD_UPDATE' && Array.isArray(data.leaderboard)) {
+      this.leaderboardData = data.leaderboard;
+      this.renderLeaderboard();
     } else if (data.type === 'ROUND_WON') {
       this.handleRoundWonBroadcast(data);
     }
@@ -553,11 +546,11 @@ class TrickJaneGame {
   handleRoundWonBroadcast(data) {
     const winner = data.winner || {};
     const phrase = winner.phrase || '';
-    const score = winner.score || 51;
-    const nextIn = data.nextRoundIn || 5;
+    const score = winner.score || 50;
+    const nextIn = data.nextRoundIn || 3;
 
-    this.dom.winnerHeadline.textContent = `@${winner.username} WON Round #${data.round || this.raceRound}!`;
-    this.dom.winnerSub.textContent = `“${phrase}” (${score}%) • Next question resets for everyone in ${nextIn}s...`;
+    this.dom.winnerHeadline.textContent = `🏆 @${winner.username} WON Round #${data.round || this.raceRound}!`;
+    this.dom.winnerSub.textContent = `“${phrase}” (${score}%) • Loading next question automatically in ${nextIn}s...`;
     this.dom.raceWinnerBanner.classList.remove('hidden');
 
     this.confetti.burst(120);
@@ -657,12 +650,11 @@ class TrickJaneGame {
       }));
     }
 
-    // Save points to database for logged in user
-    if (this.currentUser) {
-      this.submitScoreToLeaderboard(fullPhrase);
-    } else if (lastSubmittedPhrase) {
-      this.showToast('Tip: Sign in or create an account to record your points on the leaderboard!');
-    }
+    // Immediately reflect high score on leaderboard for player (signed in or guest)
+    const effectiveUsername = this.getEffectiveUsername();
+    const points = Math.round(this.currentProbability);
+    this.reflectScoreOnLeaderboard(effectiveUsername, points, fullPhrase);
+    this.submitScoreToLeaderboard(fullPhrase, effectiveUsername, points);
   }
 
   handleWin(fullPhrase) {
@@ -676,9 +668,17 @@ class TrickJaneGame {
 
         // Reveal Next Question Banner
         this.dom.roundWinBadge.textContent = 'Warm-up 1 of 2 Complete!';
-        this.dom.roundWinMsg.textContent = `You pushed Jane to ${this.currentProbability}%. Question 2 is unlocked!`;
+        this.dom.roundWinMsg.textContent = `You pushed Jane to ${this.currentProbability}%. Advancing to Question 2 in 3s...`;
         this.dom.roundNextBtnText.textContent = 'Next Question →';
         this.dom.roundWinBanner.classList.remove('hidden');
+
+        // Automatically advance to Question 2 in 3 seconds
+        clearTimeout(this.warmupAutoNextTimeout);
+        this.warmupAutoNextTimeout = setTimeout(() => {
+          if (this.gameMode === 'warmup' && this.currentWarmupRound === 1) {
+            this.loadWarmupRound(2);
+          }
+        }, 3000);
       } else if (this.currentWarmupRound === 2 && !this.warmupProgress[2]) {
         this.warmupProgress[2] = true;
         localStorage.setItem('trickjane:warmup_progress', JSON.stringify(this.warmupProgress));
@@ -688,14 +688,18 @@ class TrickJaneGame {
 
         // Reveal Race Mode Unlocked Banner & Modal
         this.dom.roundWinBadge.textContent = 'Warm-ups Conquered!';
-        this.dom.roundWinMsg.textContent = `You beat both solo challenges (${this.currentProbability}%). Live Race Mode is unlocked!`;
+        this.dom.roundWinMsg.textContent = `You beat both solo challenges (${this.currentProbability}%). Entering Live Race in 3s...`;
         this.dom.roundNextBtnText.textContent = 'Enter Live Race Arena 🏁';
         this.dom.roundWinBanner.classList.remove('hidden');
 
-        // Open Celebration Modal
-        if (this.dom.raceUnlockedModal) {
-          this.dom.raceUnlockedModal.showModal();
-        }
+        // Automatically advance to Live Race in 3 seconds
+        clearTimeout(this.warmupAutoNextTimeout);
+        this.warmupAutoNextTimeout = setTimeout(() => {
+          if (this.gameMode === 'warmup') {
+            if (this.dom.raceUnlockedModal?.open) this.dom.raceUnlockedModal.close();
+            this.enterRaceMode();
+          }
+        }, 3000);
       }
     } else if (this.gameMode === 'race') {
       // First to cross 50% in race mode!
@@ -963,7 +967,7 @@ class TrickJaneGame {
         window.Clerk.mountUserButton(userBtnEl);
       }
 
-      // Show leaderboard to logged-in users only
+      // Ensure leaderboard is always displayed to all visitors
       if (this.dom.leaderboardCard) this.dom.leaderboardCard.classList.remove('hidden');
       if (this.dom.leaderboardLockedCard) this.dom.leaderboardLockedCard.classList.add('hidden');
       this.fetchLeaderboard();
@@ -971,9 +975,10 @@ class TrickJaneGame {
       if (this.dom.authButtonsGroup) this.dom.authButtonsGroup.classList.remove('hidden');
       if (this.dom.userBadge) this.dom.userBadge.classList.add('hidden');
 
-      // Hide leaderboard for logged-out users, show locked prompt
-      if (this.dom.leaderboardCard) this.dom.leaderboardCard.classList.add('hidden');
-      if (this.dom.leaderboardLockedCard) this.dom.leaderboardLockedCard.classList.remove('hidden');
+      // Ensure leaderboard is always displayed to all visitors
+      if (this.dom.leaderboardCard) this.dom.leaderboardCard.classList.remove('hidden');
+      if (this.dom.leaderboardLockedCard) this.dom.leaderboardLockedCard.classList.add('hidden');
+      this.fetchLeaderboard();
     }
   }
 
@@ -1155,9 +1160,13 @@ class TrickJaneGame {
 
     this.leaderboardData.slice(0, 10).forEach((entry, idx) => {
       const tr = document.createElement('tr');
-      const isCurrent = this.currentUser && this.currentUser.username.toLowerCase() === entry.username.toLowerCase();
+      const effectiveUser = this.getEffectiveUsername();
+      const isCurrent = effectiveUser && effectiveUser.toLowerCase() === entry.username.toLowerCase();
       if (isCurrent) {
         tr.className = 'highlight-user';
+        if (this.justUpdatedUser && this.justUpdatedUser.toLowerCase() === entry.username.toLowerCase()) {
+          tr.classList.add('just-updated');
+        }
       }
 
       let rankDisplay = '';
@@ -1272,8 +1281,82 @@ class TrickJaneGame {
     });
   }
 
-  async submitScoreToLeaderboard(lastPhrase = '') {
-    if (!this.currentUser) return;
+  getEffectiveUsername() {
+    if (this.currentUser && this.currentUser.username) {
+      return this.currentUser.username;
+    }
+    let guest = localStorage.getItem('trickjane:guest_user');
+    if (!guest) {
+      guest = 'Trickster_' + Math.floor(100 + Math.random() * 900);
+      localStorage.setItem('trickjane:guest_user', guest);
+    }
+    return guest;
+  }
+
+  reflectScoreOnLeaderboard(username, points, phrase = '') {
+    if (!username || typeof points !== 'number') return;
+    if (!this.leaderboardData) this.leaderboardData = [];
+
+    const cleanUser = username.trim();
+    const existingIdx = this.leaderboardData.findIndex(
+      e => e.username.toLowerCase() === cleanUser.toLowerCase()
+    );
+
+    let isNewHighScore = false;
+    if (existingIdx >= 0) {
+      const existing = this.leaderboardData[existingIdx];
+      // Only replace if new score is strictly higher than existing score
+      if (points > (existing.probability || 0)) {
+        isNewHighScore = true;
+        existing.probability = points;
+        existing.phrase = phrase || existing.phrase;
+        existing.wordCount = this.chain.length || existing.wordCount;
+        existing.achievedAt = new Date().toISOString();
+        this.justUpdatedUser = cleanUser;
+        this.renderLeaderboard();
+        if (points > this.baseline) {
+          this.showToast(`🏆 New High Score! @${cleanUser} jumped to ${points}% on the leaderboard.`);
+        }
+      }
+      // If points <= existing.probability, do NOT replace
+    } else {
+      // Add where there is no existing score
+      isNewHighScore = true;
+      this.leaderboardData.push({
+        id: 'lb_local_' + Date.now(),
+        username: cleanUser,
+        probability: points,
+        wordCount: this.chain.length,
+        phrase: phrase || '',
+        achievedAt: new Date().toISOString()
+      });
+      this.justUpdatedUser = cleanUser;
+      this.renderLeaderboard();
+      if (points > this.baseline) {
+        this.showToast(`🏆 Score Recorded! @${cleanUser} added to the leaderboard at ${points}%.`);
+      }
+    }
+
+    // Sort: highest points first, then lowest word count
+    this.leaderboardData.sort((a, b) => 
+      (b.probability || 0) - (a.probability || 0) || 
+      (a.wordCount || 0) - (b.wordCount || 0)
+    );
+  }
+
+  async submitScoreToLeaderboard(lastPhrase = '', username = null, points = null) {
+    const userToSubmit = username || this.getEffectiveUsername();
+    const scoreToSubmit = typeof points === 'number' ? points : Math.round(this.currentProbability);
+
+    // Only submit if no existing entry or if new score is strictly higher
+    if (this.leaderboardData) {
+      const existing = this.leaderboardData.find(
+        e => e.username.toLowerCase() === userToSubmit.toLowerCase()
+      );
+      if (existing && scoreToSubmit <= (existing.probability || 0)) {
+        return;
+      }
+    }
 
     const fullChainText = this.chain.map(c => c.word).join(' ');
     const phrase = fullChainText || lastPhrase;
@@ -1283,8 +1366,8 @@ class TrickJaneGame {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: this.currentUser.username,
-          probability: this.currentProbability,
+          username: userToSubmit,
+          probability: scoreToSubmit,
           wordCount: this.chain.length,
           phrase: phrase
         })
@@ -1292,8 +1375,10 @@ class TrickJaneGame {
 
       if (res.ok) {
         const data = await res.json();
-        this.leaderboardData = data.leaderboard || [];
-        this.renderLeaderboard();
+        if (Array.isArray(data.leaderboard)) {
+          this.leaderboardData = data.leaderboard;
+          this.renderLeaderboard();
+        }
       }
     } catch (err) {
       console.error('Failed to submit score to leaderboard:', err);
