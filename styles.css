@@ -1766,24 +1766,6 @@ body {
   color: var(--text-muted);
 }
 
-.try-words-btn {
-  background-color: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  border: 1px solid var(--btn-primary-border);
-  font-family: 'Inter', sans-serif;
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 0.35rem 0.75rem;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.15s ease;
-  line-height: 1.2;
-}
-
-.try-words-btn:hover {
-  background-color: var(--btn-primary-hover);
-}
-
 .td-score {
   font-weight: 800;
   color: #15803d;

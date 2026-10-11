@@ -266,19 +266,6 @@ class TrickJaneGame {
           this.renderLeaderboard();
           return;
         }
-
-        const tryBtn = e.target.closest('.try-words-btn');
-        if (tryBtn) {
-          e.preventDefault();
-          sound.playClick();
-          const phrase = tryBtn.dataset.phrase;
-          if (phrase) {
-            this.dom.wordInput.value = phrase;
-            this.dom.wordInput.focus();
-            this.showToast(`Loaded words into input: "${phrase}"`);
-          }
-          return;
-        }
       });
     }
 
@@ -354,6 +341,7 @@ class TrickJaneGame {
   // Solo Mode: Warm-up Progression & Random Question Selection
   // =========================================================================
   shuffleQuestion() {
+    if (this.gameMode === 'race') return;
     sound.playClick();
     this.loadWarmupRound(this.currentWarmupRound, true);
     this.showToast(`🎲 Random Question loaded: "${this.currentDilemma.title}"`);
@@ -387,9 +375,10 @@ class TrickJaneGame {
     this.dom.thoughtText.textContent = `"${quote}"`;
     this.dom.wordInput.value = '';
 
-    // Hide Race Arena and Win Banner
+    // Hide Race Arena and Win Banner, show Random Question button in solo mode
     this.dom.raceArenaBox.classList.add('hidden');
     this.dom.roundWinBanner.classList.add('hidden');
+    if (this.dom.randomQuestionBtn) this.dom.randomQuestionBtn.classList.remove('hidden');
 
     this.updateStepperUI();
     this._updateUI(this.baseline, 0, '');
@@ -457,6 +446,7 @@ class TrickJaneGame {
     this.gameMode = 'race';
     this.dom.roundWinBanner.classList.add('hidden');
     this.dom.raceArenaBox.classList.remove('hidden');
+    if (this.dom.randomQuestionBtn) this.dom.randomQuestionBtn.classList.add('hidden');
     this.updateStepperUI();
 
     this.connectRaceSocket();
@@ -532,6 +522,7 @@ class TrickJaneGame {
       this.dom.wordInput.disabled = false;
       this.dom.raceRoundLabel.textContent = `ROUND #${this.raceRound} • LIVE MULTIPLAYER RACE`;
       this.dom.raceWinnerBanner.classList.add('hidden');
+      if (this.dom.randomQuestionBtn) this.dom.randomQuestionBtn.classList.add('hidden');
 
       if (data.type === 'NEW_ROUND') {
         this.showToast(`🏁 Next Question: "${this.currentDilemma.title}"`);
@@ -1274,11 +1265,6 @@ class TrickJaneGame {
 
               <div class="words-detail-actions">
                 <span class="words-meta-text">${entry.wordCount || words.length} words ${dateStr ? '• ' + dateStr : ''}</span>
-                ${entry.phrase ? `
-                  <button type="button" class="try-words-btn" data-phrase="${this._escapeHtml(entry.phrase)}">
-                    Use in input
-                  </button>
-                ` : ''}
               </div>
             </div>
           </td>
