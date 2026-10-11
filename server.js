@@ -157,23 +157,27 @@ let nextRoundTimeout = null;
 const raceClients = new Map(); // ws -> { username, score, phrase, wordCount }
 
 function resetFreshDilemmaPool() {
-  // Exclude warmup dilemmas from multiplayer race mode
-  availableDilemmaPool = RACE_DILEMMAS.filter(d => 
-    d.id !== 'push-stranger-footbridge' && 
-    d.id !== 'trolley-footbridge' && 
-    d.id !== 'heinz-cure' &&
-    d.id !== 'steal-medicine-cure'
-  );
-  if (availableDilemmaPool.length === 0) {
-    availableDilemmaPool = [...RACE_DILEMMAS];
+  const pool = [...RACE_DILEMMAS];
+  // Fisher-Yates random shuffle
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
+  // Ensure the top of the pool does not duplicate the current dilemma
+  if (currentRaceDilemma && pool.length > 1 && pool[0].id === currentRaceDilemma.id) {
+    const swapIdx = Math.floor(1 + Math.random() * (pool.length - 1));
+    [pool[0], pool[swapIdx]] = [pool[swapIdx], pool[0]];
+  }
+  availableDilemmaPool = pool;
 }
 
 function pickNextFreshRaceDilemma() {
-  if (availableDilemmaPool.length === 0) {
+  if (!availableDilemmaPool || availableDilemmaPool.length === 0) {
     resetFreshDilemmaPool();
   }
-  return availableDilemmaPool.shift() || RACE_DILEMMAS[0];
+  const randomIndex = Math.floor(Math.random() * availableDilemmaPool.length);
+  const picked = availableDilemmaPool.splice(randomIndex, 1)[0];
+  return picked || RACE_DILEMMAS[Math.floor(Math.random() * RACE_DILEMMAS.length)];
 }
 
 function getRacersList() {

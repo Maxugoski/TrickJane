@@ -4,29 +4,14 @@ import { sound } from './audio.js';
 import { ConfettiCannon } from './confetti.js';
 import { DILEMMAS } from './game-data.js';
 
-// Pre-defined Solo Warm-up Dilemmas
-const WARMUP_DILEMMAS = {
-  1: {
-    id: 'trolley-footbridge',
-    title: 'Should you push a stranger to save five people?',
-    shortTitle: 'The Footbridge Dilemma',
-    initialStance: 'No',
-    goalStance: 'Yes',
-    baselineProbability: 24,
-    winThreshold: 50,
-    openingQuote: "Pushing an innocent person actively causes their death, violating basic Kantian deontology. Prove to me why active harm is justifiable."
-  },
-  2: {
-    id: 'heinz-cure',
-    title: 'Is Heinz morally justified in stealing an extortionate medicine to save his dying spouse?',
-    shortTitle: 'The Heinz Dilemma',
-    initialStance: 'No',
-    goalStance: 'Yes',
-    baselineProbability: 26,
-    winThreshold: 50,
-    openingQuote: "Law cannot bend to personal emergencies, or the universal social contract crumbles into arbitrary theft. Heinz committed burglary."
-  }
-};
+// Helper to retrieve a random dilemma from the full catalog of 30 dilemmas
+function getRandomDilemma(excludeId = null) {
+  if (!Array.isArray(DILEMMAS) || DILEMMAS.length === 0) return null;
+  const pool = excludeId ? DILEMMAS.filter(d => d.id !== excludeId) : DILEMMAS;
+  const candidates = pool.length > 0 ? pool : DILEMMAS;
+  const randomIndex = Math.floor(Math.random() * candidates.length);
+  return candidates[randomIndex];
+}
 
 class TrickJaneGame {
   constructor() {
@@ -36,12 +21,13 @@ class TrickJaneGame {
     // Game Modes: 'warmup' or 'race'
     this.gameMode = 'warmup';
     this.currentWarmupRound = 1;
+    this.lastWarmupRound = null;
     this.warmupProgress = JSON.parse(
       localStorage.getItem('trickjane:warmup_progress') || '{"1":false,"2":false}'
     );
 
-    // Current Dilemma Configuration
-    this.currentDilemma = WARMUP_DILEMMAS[1];
+    // Current Dilemma Configuration (Always starts with a random dilemma from catalog)
+    this.currentDilemma = getRandomDilemma();
     this.baseline = this.currentDilemma.baselineProbability;
     this.currentProbability = this.baseline;
     this.previousProbability = this.baseline;
@@ -155,7 +141,10 @@ class TrickJaneGame {
       // Race Mode Unlocked Celebration Modal
       raceUnlockedModal: document.getElementById('race-unlocked-modal'),
       closeRaceModalBtn: document.getElementById('close-race-modal-btn'),
-      enterRaceBtn: document.getElementById('enter-race-btn')
+      enterRaceBtn: document.getElementById('enter-race-btn'),
+
+      // Random Question Button
+      randomQuestionBtn: document.getElementById('random-question-btn')
     };
 
     this.init();
@@ -165,9 +154,16 @@ class TrickJaneGame {
     this.initTheme();
     this.initClerk();
 
-    // Start on Warm-up 1 or saved question
+    // Start on Warm-up 1 or saved question with a random dilemma
     const initialRound = (this.warmupProgress[1] && !this.warmupProgress[2]) ? 2 : 1;
-    this.loadWarmupRound(initialRound);
+    this.loadWarmupRound(initialRound, true);
+
+    // Bind Random Question Button
+    if (this.dom.randomQuestionBtn) {
+      this.dom.randomQuestionBtn.addEventListener('click', () => {
+        this.shuffleQuestion();
+      });
+    }
 
     // Bind Game Events
     this.dom.inputForm.addEventListener('submit', (e) => {
@@ -190,7 +186,7 @@ class TrickJaneGame {
       sound.playClick();
       clearTimeout(this.warmupAutoNextTimeout);
       if (this.currentWarmupRound === 1) {
-        this.loadWarmupRound(2);
+        this.loadWarmupRound(2, true);
       } else {
         this.enterRaceMode();
       }
@@ -355,14 +351,25 @@ class TrickJaneGame {
   }
 
   // =========================================================================
-  // Solo Mode: Warm-up Progression
+  // Solo Mode: Warm-up Progression & Random Question Selection
   // =========================================================================
-  loadWarmupRound(roundNumber) {
+  shuffleQuestion() {
+    sound.playClick();
+    this.loadWarmupRound(this.currentWarmupRound, true);
+    this.showToast(`🎲 Random Question loaded: "${this.currentDilemma.title}"`);
+  }
+
+  loadWarmupRound(roundNumber, forceNew = false) {
     this.gameMode = 'warmup';
     this.currentWarmupRound = roundNumber;
     this.disconnectRaceSocket();
 
-    this.currentDilemma = WARMUP_DILEMMAS[roundNumber] || WARMUP_DILEMMAS[1];
+    // Always pick a fresh random dilemma from the 30 dilemmas catalog
+    if (forceNew || !this.currentDilemma || roundNumber !== this.lastWarmupRound) {
+      this.currentDilemma = getRandomDilemma(this.currentDilemma?.id);
+      this.lastWarmupRound = roundNumber;
+    }
+
     this.baseline = this.currentDilemma.baselineProbability;
     this.currentProbability = this.baseline;
     this.previousProbability = this.baseline;
@@ -372,11 +379,12 @@ class TrickJaneGame {
 
     // Update Headings & Texts
     this.dom.dilemmaTitle.textContent = this.currentDilemma.title;
-    if (this.dom.verdictNo) this.dom.verdictNo.textContent = this.currentDilemma.initialStance;
-    if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance;
+    if (this.dom.verdictNo) this.dom.verdictNo.textContent = this.currentDilemma.initialStance || 'No';
+    if (this.dom.verdictYes) this.dom.verdictYes.textContent = this.currentDilemma.goalStance || 'Yes';
     if (this.dom.targetWordBadge) this.dom.targetWordBadge.textContent = (this.currentDilemma.goalStance || 'Yes').toLowerCase();
     this.dom.scoreSub.textContent = `Started at ${this.baseline}%`;
-    this.dom.thoughtText.textContent = `"${this.currentDilemma.openingQuote}"`;
+    const quote = this.currentDilemma.sampleOpeningQuote || this.currentDilemma.openingQuote || 'Convince me.';
+    this.dom.thoughtText.textContent = `"${quote}"`;
     this.dom.wordInput.value = '';
 
     // Hide Race Arena and Win Banner
@@ -672,11 +680,11 @@ class TrickJaneGame {
         this.dom.roundNextBtnText.textContent = 'Next Question →';
         this.dom.roundWinBanner.classList.remove('hidden');
 
-        // Automatically advance to Question 2 in 3 seconds
+        // Automatically advance to Question 2 in 3 seconds with a new random question
         clearTimeout(this.warmupAutoNextTimeout);
         this.warmupAutoNextTimeout = setTimeout(() => {
           if (this.gameMode === 'warmup' && this.currentWarmupRound === 1) {
-            this.loadWarmupRound(2);
+            this.loadWarmupRound(2, true);
           }
         }, 3000);
       } else if (this.currentWarmupRound === 2 && !this.warmupProgress[2]) {

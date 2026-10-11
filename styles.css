@@ -876,6 +876,47 @@ body {
   letter-spacing: -0.01em;
 }
 
+.verdict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.random-question-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: var(--card-bg);
+  border: 1.5px solid var(--theme-btn-border);
+  color: var(--text-main);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 0.45rem 0.95rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.random-question-btn:hover {
+  background-color: var(--theme-btn-hover);
+  border-color: #b5179e;
+  color: #b5179e;
+  transform: translateY(-1px);
+}
+
+.random-question-btn:active {
+  transform: translateY(1px);
+}
+
+[data-theme="dark"] .random-question-btn:hover {
+  border-color: #e879f9;
+  color: #e879f9;
+}
+
 .verdict-no {
   color: #c026d3;
   font-weight: 700;
